@@ -72,7 +72,7 @@ export default function VenuePanel({
         <div className="text-xs text-[#6b7080] mt-1">
           {venues.length} venues discovered
           {" · "}
-          {venues.filter((v) => v.busyness !== null).length} with live data
+          {venues.filter((v) => v.busyness != null && v.busyness > 0).length} with live data
         </div>
       </div>
 
@@ -90,7 +90,7 @@ export default function VenuePanel({
           >
             <div className="flex items-center justify-between">
               <span className="text-sm text-[#e2e4e9] truncate max-w-[180px]">{v.name}</span>
-              {v.busyness !== null ? (
+              {v.busyness != null && v.busyness > 0 ? (
                 <span
                   className="text-xs font-mono font-bold"
                   style={{
@@ -113,7 +113,7 @@ export default function VenuePanel({
 
             <div className="text-[10px] text-[#454a58] mt-0.5">{v.amenity_type}</div>
 
-            {v.busyness !== null && (
+            {v.busyness != null && v.busyness > 0 && (
               <div className="mt-1.5">
                 <BusynessBar value={v.busyness} />
               </div>

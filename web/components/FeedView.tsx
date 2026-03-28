@@ -74,7 +74,7 @@ export default function FeedView({
       {suggestions.length > 0 && (
         <section className="mb-8">
           <h2 className="text-[10px] font-mono tracking-[0.2em] text-[#00d4aa] uppercase mb-3">
-            Live Trivia Suggestions
+            Trending Topics
           </h2>
           <div className="space-y-2">
             {suggestions.map((s, i) => (

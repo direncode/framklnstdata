@@ -146,7 +146,7 @@ export default function MapView({
     ctx.font = "10px 'Inter', system-ui, sans-serif";
     ctx.textAlign = "left";
     venues.forEach((v) => {
-      if (v.busyness !== null && v.busyness >= 40) {
+      if (v.busyness != null && v.busyness > 0 && v.busyness >= 40) {
         const p = project(v.lat, v.lon, w, h);
         const r = busynessRadius(v.busyness);
         ctx.fillStyle = "#e2e4e9aa";
@@ -210,7 +210,7 @@ export default function MapView({
         >
           <div className="text-[#00d4aa] font-semibold">{tooltip.venue.name}</div>
           <div className="text-[#6b7080] mt-1">
-            {tooltip.venue.busyness !== null
+            {tooltip.venue.busyness != null && tooltip.venue.busyness > 0
               ? `${tooltip.venue.busyness}% busy`
               : "busyness unknown"}
           </div>

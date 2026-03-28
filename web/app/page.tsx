@@ -97,7 +97,7 @@ export default function Home() {
     if (tab === "feed") fetchFeed();
   }, [tab, fetchFeed]);
 
-  const liveCount = venues.filter((v) => v.busyness !== null).length;
+  const liveCount = venues.filter((v) => v.busyness != null && v.busyness > 0).length;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -131,7 +131,7 @@ export default function Home() {
                     <div className="metric-card">
                       <div className="text-[9px] text-[#454a58] uppercase">Peak</div>
                       <div className="text-lg font-mono text-[#ff6600]">
-                        {(() => { const vals = venues.filter(v => v.busyness !== null).map(v => v.busyness!); return vals.length > 0 ? Math.max(...vals) : 0; })()}%
+                        {(() => { const vals = venues.filter(v => v.busyness != null && v.busyness > 0).map(v => v.busyness!); return vals.length > 0 ? Math.max(...vals) : 0; })()}%
                       </div>
                     </div>
                   )}
@@ -252,7 +252,7 @@ export default function Home() {
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">04</span>
-                  <span>Live feeds (Reddit, DTH, UNC Calendar, Google Trends) extract keywords and generate trivia topic suggestions.</span>
+                  <span>Live feeds (Reddit, DTH, UNC Calendar, Google Trends) extract keywords and surface trending topics.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">05</span>
@@ -284,7 +284,7 @@ export default function Home() {
                           <td className="px-3 py-1.5 text-[#e2e4e9]">{v.name}</td>
                           <td className="px-3 py-1.5 text-[#6b7080]">{v.amenity_type}</td>
                           <td className="px-3 py-1.5 text-right">
-                            {v.busyness !== null ? (
+                            {v.busyness != null && v.busyness > 0 ? (
                               <span
                                 style={{
                                   color:
