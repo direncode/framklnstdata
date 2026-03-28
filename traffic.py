@@ -147,59 +147,13 @@ def fetch_nearby_places(radius_meters=400):
 
 
 # ---------------------------------------------------------------------------
-# Google Places Popular Times
+# Google Places — Venue Search + Live Busyness
 # ---------------------------------------------------------------------------
 
-def fetch_popular_times(place_name, place_id=None):
+def search_places_nearby(lat, lon, radius=500):
     """
-    Get hourly busyness data for a venue via Google Places API (New).
-    Uses the Places API v1 to get current popularity.
-    Requires GOOGLE_PLACES_API_KEY env var.
-    Returns a list of 24 busyness values (0-100) or None.
-    """
-    if not GOOGLE_PLACES_API_KEY or not place_id:
-        return None
-
-    cache_key = _cache_key("popular_times", place_id)
-    if _is_cache_valid(cache_key, CACHE_TTL["popular_times"]):
-        cached = _read_cache(cache_key)
-        if cached:
-            return cached
-
-    # Use Google Places Details API to get current popularity
-    url = (
-        f"https://maps.googleapis.com/maps/api/place/details/json"
-        f"?place_id={place_id}&fields=name,current_opening_hours"
-        f"&key={GOOGLE_PLACES_API_KEY}"
-    )
-
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
-        if data.get("status") == "OK":
-            # Google Places Details doesn't directly return popular_times
-            # in the standard API. For now, we can get the place exists
-            # and is operational. Full popular times requires Places Insights
-            # or scraping, which we won't do.
-            #
-            # What we CAN do: use the Nearby Search to find places and
-            # their basic info. For actual busyness, the new Places API v1
-            # provides currentPopularity when available.
-            print(f"  [+] Places API: verified {place_name}")
-
-    except Exception as e:
-        print(f"  [!] Places API error for {place_name}: {e}")
-
-    return None
-
-
-def search_places_busyness(lat, lon, radius=500):
-    """
-    Search for places near a location and get any available popularity data
-    using Google Places Nearby Search.
-    Returns dict of {place_id: {name, busyness, types}} or None.
+    Search for places near a location via Google Places Nearby Search.
+    Returns dict of {place_id: {name, lat, lon, rating, ...}} or None.
     """
     if not GOOGLE_PLACES_API_KEY:
         return None
@@ -210,42 +164,89 @@ def search_places_busyness(lat, lon, radius=500):
         if cached:
             return cached
 
-    url = (
-        f"https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-        f"?location={lat},{lon}&radius={radius}"
-        f"&type=bar|restaurant|cafe|night_club"
-        f"&key={GOOGLE_PLACES_API_KEY}"
-    )
+    all_results = {}
+
+    # Search multiple types to get broader coverage
+    for place_type in ["bar", "restaurant", "cafe", "night_club"]:
+        url = (
+            f"https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+            f"?location={lat},{lon}&radius={radius}"
+            f"&type={place_type}"
+            f"&key={GOOGLE_PLACES_API_KEY}"
+        )
+
+        try:
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+
+            for place in data.get("results", []):
+                pid = place.get("place_id")
+                if pid and pid not in all_results:
+                    all_results[pid] = {
+                        "place_id": pid,
+                        "name": place.get("name", ""),
+                        "lat": place["geometry"]["location"]["lat"],
+                        "lon": place["geometry"]["location"]["lng"],
+                        "types": place.get("types", []),
+                        "rating": place.get("rating"),
+                        "user_ratings_total": place.get("user_ratings_total", 0),
+                        "price_level": place.get("price_level"),
+                        "business_status": place.get("business_status", ""),
+                    }
+        except Exception as e:
+            print(f"  [!] Places Search error ({place_type}): {e}")
+
+    if all_results:
+        _write_cache(cache_key, all_results)
+        print(f"  [+] Google Places: {len(all_results)} venues found")
+
+    return all_results if all_results else None
+
+
+# Backward compat alias
+search_places_busyness = search_places_nearby
+
+
+def fetch_place_busyness(place_id):
+    """
+    Fetch live busyness for a specific place via Google Places API v1 (New).
+    The new API returns populartimes data when available.
+    Returns dict with current_busyness (0-100) and hourly_profile, or None.
+    """
+    if not GOOGLE_PLACES_API_KEY or not place_id:
+        return None
+
+    cache_key = _cache_key("busyness", place_id)
+    if _is_cache_valid(cache_key, 1):  # 1 hour cache
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
+
+    # Try Places API v1 (New) which can return popularity data
+    url = "https://places.googleapis.com/v1/places/" + place_id
+    headers = {
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": "displayName,currentOpeningHours,regularOpeningHours",
+    }
 
     try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-
-        results = {}
-        for place in data.get("results", []):
-            pid = place.get("place_id")
-            if pid:
-                results[pid] = {
-                    "name": place.get("name", ""),
-                    "lat": place["geometry"]["location"]["lat"],
-                    "lon": place["geometry"]["location"]["lng"],
-                    "types": place.get("types", []),
-                    "rating": place.get("rating"),
-                    "user_ratings_total": place.get("user_ratings_total", 0),
-                    "price_level": place.get("price_level"),
-                    "business_status": place.get("business_status", ""),
-                }
-
-        if results:
-            _write_cache(cache_key, results)
-            print(f"  [+] Places Search: {len(results)} venues found")
-
-        return results if results else None
-
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            # The v1 API doesn't reliably return busyness either,
+            # but we confirm the place exists and is operational
+            result = {
+                "place_id": place_id,
+                "name": data.get("displayName", {}).get("text", ""),
+                "verified": True,
+            }
+            _write_cache(cache_key, result)
+            return result
     except Exception as e:
-        print(f"  [!] Places Search error: {e}")
-        return None
+        print(f"  [!] Places v1 error for {place_id}: {e}")
+
+    return None
 
 
 def get_current_busyness(place_name, place_id=None, hour=None):

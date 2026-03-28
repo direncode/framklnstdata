@@ -220,7 +220,7 @@ export default function MapView({
 
       {/* Overlay labels */}
       <div className="absolute top-3 left-3 text-[10px] font-mono text-[#454a58] tracking-wider uppercase">
-        Foot Traffic Convergence — {hour}:00
+        Venue Popularity — {hour}:00
       </div>
       <div className="absolute bottom-3 right-3 flex gap-3 text-[9px] font-mono text-[#454a58]">
         <span className="flex items-center gap-1">
