@@ -106,6 +106,8 @@ def besttime_venue_search():
                 venues = data["venues"]
                 _write_cache("besttime_search", venues)
                 return venues
+        elif resp.status_code == 409:
+            print("  [!] BestTime API quota exhausted. Using OSM data only.")
         else:
             print(f"  [!] BestTime search HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
@@ -159,7 +161,7 @@ def besttime_venue_filter(hour=None, day_of_week=None):
 
     Returns list of venues with busyness data.
     """
-    if not BESTTIME_PUBLIC_KEY:
+    if not BESTTIME_PRIVATE_KEY:
         return None
 
     if hour is None:
@@ -179,7 +181,7 @@ def besttime_venue_filter(hour=None, day_of_week=None):
         resp = requests.get(
             f"{BESTTIME_BASE}/venues/filter",
             params={
-                "api_key_public": BESTTIME_PUBLIC_KEY,
+                "api_key_private": BESTTIME_PRIVATE_KEY,
                 "lat": lat,
                 "lng": lon,
                 "radius": 500,
@@ -188,7 +190,7 @@ def besttime_venue_filter(hour=None, day_of_week=None):
                 "types": "BAR,RESTAURANT,CAFE,CLUB,PUB,NIGHT_CLUB",
                 "order_by": "day_rank_max",
                 "order": "desc",
-                "foot_traffic": "true",
+                "foot_traffic": "both",
                 "limit": 100,
             },
             timeout=20,
@@ -227,6 +229,8 @@ def besttime_venue_filter(hour=None, day_of_week=None):
                 return result
             else:
                 print(f"  [!] BestTime filter: no venues returned")
+        elif resp.status_code == 409:
+            print("  [!] BestTime API quota exhausted. Using OSM data only.")
         else:
             print(f"  [!] BestTime filter HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as e:

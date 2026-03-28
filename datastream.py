@@ -595,9 +595,20 @@ if __name__ == "__main__":
     print("    /export          Complete data export")
     print()
 
+    import signal
+
     server = HTTPServer((args.host, args.port), DataHandler)
+
+    def graceful_shutdown(signum, frame):
+        signame = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT"}.get(signum, str(signum))
+        print(f"\n  Received {signame}, shutting down...")
+        server.shutdown()
+
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n  Datastream shutdown.")
+    finally:
+        print("  Datastream shutdown.")
         server.server_close()
