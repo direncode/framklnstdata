@@ -20,22 +20,23 @@ interface Venue {
   hourly_profile: number[] | null;
 }
 
-interface FeedData {
-  reddit: Array<{ source: string; title: string; score?: number; comments?: number }> | null;
-  dth: Array<{ source: string; title: string; summary?: string }> | null;
-  trends: {
-    nationally_trending: string[];
-    locally_relevant: string[];
-    core_keyword_interest: Record<string, number>;
-  } | null;
-  unc_events: Array<{ title: string; location: string; date: string }> | null;
-  extracted_keywords: Array<{ keyword: string; frequency: number }>;
-  trivia_suggestions: Array<{
-    source: string;
-    topic: string;
-    signal: string;
+interface TrendsData {
+  has_data: boolean;
+  geo: string;
+  geo_description: string;
+  suggestions: Array<{
+    category: string;
+    keyword: string;
+    score: number;
+    strength: string;
     suggestion: string;
+    rising_queries: string[];
+    rising_topics: string[];
+    top_cities: Array<{ city: string; interest: number }>;
   }>;
+  trending_now: string[];
+  locally_relevant: string[];
+  interest_by_city: Record<string, Array<{ city: string; interest: number }>>;
 }
 
 const API_BASE = "/api/data";
@@ -45,7 +46,7 @@ export default function Home() {
   const [hour, setHour] = useState(new Date().getHours());
   const [venues, setVenues] = useState<Venue[]>([]);
   const [selectedVenue, setSelectedVenue] = useState<string | null>(null);
-  const [feed, setFeed] = useState<FeedData | null>(null);
+  const [trends, setTrends] = useState<TrendsData | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
 
   const fetchVenues = useCallback(async () => {
@@ -79,12 +80,12 @@ export default function Home() {
     setApiConnected(false);
   }, [hour]);
 
-  const fetchFeed = useCallback(async () => {
+  const fetchTrends = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/livefeed`);
+      const res = await fetch(`${API_BASE}/trends?live=true`);
       if (res.ok) {
         const data = await res.json();
-        setFeed(data);
+        setTrends(data);
       }
     } catch { /* empty */ }
   }, []);
@@ -94,8 +95,8 @@ export default function Home() {
   }, [fetchVenues]);
 
   useEffect(() => {
-    if (tab === "feed") fetchFeed();
-  }, [tab, fetchFeed]);
+    if (tab === "feed") fetchTrends();
+  }, [tab, fetchTrends]);
 
   const liveCount = venues.filter((v) => v.busyness != null && v.busyness > 0).length;
 
@@ -182,26 +183,14 @@ export default function Home() {
           </>
         )}
 
-        {tab === "feed" && feed && (
+        {tab === "feed" && (
           <FeedView
-            reddit={feed.reddit}
-            dth={feed.dth}
-            keywords={feed.extracted_keywords}
-            suggestions={feed.trivia_suggestions}
-            trending={feed.trends?.locally_relevant || null}
-            events={feed.unc_events}
+            suggestions={trends?.suggestions || []}
+            keywords={[]}
+            trending={trends?.locally_relevant || null}
+            interestByCity={trends?.interest_by_city || {}}
+            geoDescription={trends?.geo_description || ""}
           />
-        )}
-
-        {tab === "feed" && !feed && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-[#454a58] text-sm">Loading live feed...</div>
-              <div className="text-[#454a58] text-xs mt-2">
-                Connect to Franklin Street Data API for Reddit, DTH, UNC Calendar, and Trends data
-              </div>
-            </div>
-          </div>
         )}
 
         {tab === "intel" && (

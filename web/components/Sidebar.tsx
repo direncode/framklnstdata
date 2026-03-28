@@ -4,7 +4,7 @@ type Tab = "map" | "feed" | "intel";
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: "map", label: "SURVEILLANCE", icon: "◎" },
-  { id: "feed", label: "LIVE FEED", icon: "◈" },
+  { id: "feed", label: "TRENDS", icon: "◈" },
   { id: "intel", label: "INTEL", icon: "◆" },
 ];
 
