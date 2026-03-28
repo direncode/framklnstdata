@@ -41,7 +41,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from config import FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS
-from spots import get_enriched_spots, FRANKLIN_STREET_SPOTS
+from spots import get_enriched_spots, discover_venues
 from traffic import (
     build_heatmap_data,
     fetch_nearby_places,
@@ -70,7 +70,7 @@ from osint import (
     fetch_all_reddit,
     estimate_pedestrian_flow,
 )
-from forecast import build_forecast_report, simulate_event_impact
+from forecast import build_forecast_report
 from livefeed import build_live_feed
 from network import (
     fetch_street_network,
@@ -174,7 +174,7 @@ def handle_status():
         "surveillance_area": {
             "center": list(FRANKLIN_STREET_CENTER),
             "radius_meters": 400,
-            "curated_spots": len(FRANKLIN_STREET_SPOTS),
+            "venue_source": "OpenStreetMap Overpass API",
         },
     }
 
@@ -222,7 +222,7 @@ def handle_spot_detail(spot_id, params):
     """Single spot deep dive."""
     hour = _parse_hour(params.get("hour", [None])[0])
 
-    spots = copy.deepcopy(FRANKLIN_STREET_SPOTS)
+    spots = get_enriched_spots(hour=hour, top_n=100)
     spots = aggregate_busyness(spots, hour=hour)
 
     spot = next((s for s in spots if s["id"] == spot_id), None)
@@ -259,7 +259,7 @@ def handle_traffic(params):
     hour = _parse_hour(params.get("hour", [None])[0])
     day = _parse_day(params.get("day", [None])[0])
 
-    spots = copy.deepcopy(FRANKLIN_STREET_SPOTS)
+    spots = get_enriched_spots(hour=hour, top_n=100)
     spots = aggregate_busyness(spots, hour=hour)
 
     event = get_event_context()
@@ -487,12 +487,6 @@ def handle_forecast(params):
     return build_forecast_report()
 
 
-def handle_simulate(params):
-    """Event impact simulation."""
-    event_type = params.get("event", ["basketball_home_game"])[0]
-    return simulate_event_impact(event_type)
-
-
 def handle_export(params):
     """Complete data export — all feeds combined."""
     hour = _parse_hour(params.get("hour", [None])[0])
@@ -548,7 +542,6 @@ class PanopticonHandler(BaseHTTPRequestHandler):
             "/osint/transit": handle_transit,
             "/livefeed": handle_livefeed,
             "/forecast": lambda: handle_forecast(params),
-            "/forecast/simulate": lambda: handle_simulate(params),
             "/report": lambda: handle_report(params),
             "/export": lambda: handle_export(params),
         }

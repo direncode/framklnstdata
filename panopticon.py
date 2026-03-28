@@ -20,13 +20,9 @@ Generates a combined surveillance report with:
 import textwrap
 from datetime import datetime
 
-from spots import get_enriched_spots, get_ranked_spots
+from spots import get_enriched_spots
 from trends import build_trends_report, generate_trivia_suggestions
-from traffic import (
-    aggregate_busyness,
-    fetch_nearby_places,
-    get_ncdot_traffic,
-)
+from traffic import get_ncdot_traffic
 
 
 # ---------------------------------------------------------------------------
@@ -91,99 +87,82 @@ def generate_report(
     lines.append("─" * 62)
     lines.append("")
 
-    if fetch_live_traffic:
-        spots = get_enriched_spots(
-            time_of_day=time_of_day, hour=hour, top_n=num_spots
+    spots = get_enriched_spots(hour=hour, top_n=num_spots)
+
+    if not spots:
+        lines.append("  No venues discovered (need network access for OSM)")
+        lines.append("")
+    else:
+        lines.append(f"  {len(spots)} venues discovered via OpenStreetMap")
+        lines.append("")
+
+        # Venue type breakdown
+        by_type = {}
+        for s in spots:
+            t = s.get("amenity_type", "unknown")
+            by_type[t] = by_type.get(t, 0) + 1
+        type_str = ", ".join(
+            f"{v} {k}s" for k, v in sorted(
+                by_type.items(), key=lambda x: x[1], reverse=True
+            )
         )
-    else:
-        spots = get_ranked_spots(time_of_day=time_of_day, top_n=num_spots)
-
-    # Show busyness bar chart (only if live data available)
-    has_live = any(spot.get("live_busyness") is not None for spot in spots)
-    if has_live:
-        lines.append(f"  Live busyness at {hour}:00 (Google Places API):")
-        lines.append("")
-        for spot in spots:
-            busyness = spot.get("live_busyness")
-            if busyness is not None:
-                name = spot["name"][:35].ljust(35)
-                bar = _bar(busyness, 100, 20)
-                lines.append(f"  {name} {bar} {busyness:3d}%")
-        lines.append("")
-    else:
-        lines.append("  Live busyness: unavailable (set GOOGLE_PLACES_API_KEY)")
-        lines.append("  Using static foot_traffic scores for ranking.")
+        lines.append(f"  Types: {type_str}")
         lines.append("")
 
-    # 24-hour sparklines (only if live data available)
-    has_hourly = any(spot.get("hourly_profile") is not None for spot in spots)
-    if has_hourly:
-        lines.append("  24-hour profiles (midnight → midnight):")
-        lines.append("  " + "0   4   8   12  16  20  24")
-        for spot in spots[:5]:
-            hourly = spot.get("hourly_profile")
-            if hourly:
-                spark = _sparkline_24h(hourly)
-                name = spot["name"][:28].ljust(28)
-                lines.append(f"  {name} {spark}")
-        lines.append("")
+        # Busyness bar chart (only venues with live data)
+        has_live = any(s.get("busyness") is not None for s in spots)
+        if has_live:
+            lines.append(f"  Live busyness at {hour}:00 (Google Places API):")
+            lines.append("")
+            for spot in spots:
+                busyness = spot.get("busyness")
+                if busyness is not None:
+                    name = spot["name"][:35].ljust(35)
+                    bar = _bar(busyness, 100, 20)
+                    lines.append(f"  {name} {bar} {busyness:3d}%")
+            lines.append("")
+        else:
+            lines.append("  Live busyness: unavailable (set GOOGLE_PLACES_API_KEY)")
+            lines.append("  Venues are listed but cannot be ranked by activity.")
+            lines.append("")
 
-    # OSM venue discovery summary
-    if fetch_live_traffic:
-        try:
-            osm_places = fetch_nearby_places()
-            if osm_places:
-                lines.append(
-                    f"  OpenStreetMap scan: {len(osm_places)} venues detected "
-                    f"within 400m of Franklin St"
-                )
-                by_type = {}
-                for p in osm_places:
-                    t = p.get("amenity_type", "other")
-                    by_type[t] = by_type.get(t, 0) + 1
-                type_str = ", ".join(
-                    f"{v} {k}s" for k, v in sorted(
-                        by_type.items(), key=lambda x: x[1], reverse=True
-                    )
-                )
-                lines.append(f"  Breakdown: {type_str}")
-                lines.append("")
-        except Exception:
-            pass
+        # 24-hour sparklines
+        has_hourly = any(s.get("hourly_profile") is not None for s in spots)
+        if has_hourly:
+            lines.append("  24-hour profiles (midnight → midnight):")
+            lines.append("  " + "0   4   8   12  16  20  24")
+            for spot in spots[:8]:
+                hourly = spot.get("hourly_profile")
+                if hourly:
+                    spark = _sparkline_24h(hourly)
+                    name = spot["name"][:28].ljust(28)
+                    lines.append(f"  {name} {spark}")
+            lines.append("")
 
     # NCDOT traffic context
     ncdot = get_ncdot_traffic()
     if ncdot:
-        lines.append("  NCDOT Vehicle Traffic (AADT, context data):")
+        lines.append("  NCDOT Vehicle Traffic (AADT):")
         for road, data in ncdot.items():
             lines.append(f"    {road}: {data['aadt']:,} vehicles/day ({data['year']})")
         lines.append("")
 
     # ---------------------------------------------------------------
-    # Section 2: Top Placement Spots
+    # Section 2: Venues Ranked by Busyness
     # ---------------------------------------------------------------
     lines.append("─" * 62)
-    lines.append("  ◉ SECTION 2: TOP SPOTS FOR QR CODES & FLYERS")
-    lines.append(f"  (Ranked for {time_of_day} | {day_name})")
+    lines.append("  ◉ SECTION 2: VENUES RANKED BY BUSYNESS")
+    lines.append(f"  ({day_name} at {hour}:00)")
     lines.append("─" * 62)
     lines.append("")
 
-    for i, spot in enumerate(spots, 1):
-        busyness = spot.get("live_busyness", "N/A")
-        lines.append(f"  #{i} ─ {spot['name']}")
-        lines.append(f"      Score: {spot['composite_score']}/10 | "
-                     f"Live busyness: {busyness}%")
-        lines.append(f"      Address: {spot['address']}")
-        lines.append(f"      Best times: {', '.join(spot['best_times'])}")
-        lines.append(f"      Coords: {spot['lat']}, {spot['lon']}")
-        lines.append("")
-        # Wrap rationale
-        for line in textwrap.wrap(f"Why: {spot['rationale']}", width=56):
-            lines.append(f"      {line}")
-        lines.append("")
-        lines.append(f"      → TIP: {spot['placement_tip']}")
-        lines.append("")
-        lines.append("      " + "· " * 25)
+    for i, spot in enumerate(spots[:num_spots], 1):
+        busyness = spot.get("busyness")
+        busyness_str = f"{busyness}%" if busyness is not None else "no data"
+        vtype = spot.get("amenity_type", "")
+        lines.append(f"  #{i} ─ {spot['name']} ({vtype})")
+        lines.append(f"      Busyness: {busyness_str}")
+        lines.append(f"      Coords: {spot['lat']:.5f}, {spot['lon']:.5f}")
         lines.append("")
 
     # ---------------------------------------------------------------
@@ -200,11 +179,10 @@ def generate_report(
         lines.append("  Scanning Google Trends...")
         trends_report = build_trends_report()
 
-    suggestions, using_fallback = generate_trivia_suggestions(trends_report)
+    suggestions, has_data = generate_trivia_suggestions(trends_report)
 
-    if using_fallback:
-        lines.append("  (Using curated fallback data — "
-                     "install pytrends for live data)")
+    if not has_data:
+        lines.append("  (No trends data — install pytrends for live data)")
     lines.append("")
 
     for s in suggestions:
@@ -230,47 +208,26 @@ def generate_report(
     lines.append("─" * 62)
     lines.append("")
 
-    top3 = spots[:3]
-    lines.append("  🎯 Quick Wins (do these today):")
-    lines.append("")
-    for i, spot in enumerate(top3, 1):
-        busyness = spot.get("live_busyness", "")
-        busyness_note = f" (currently {busyness}% busy)" if busyness else ""
-        lines.append(f"  {i}. Place QR codes at {spot['name']}{busyness_note}")
-        lines.append(f"     → {spot['placement_tip']}")
+    top5 = [s for s in spots[:5] if s.get("busyness") is not None]
+    if top5:
+        lines.append("  Busiest venues right now — go where the people are:")
+        lines.append("")
+        for i, spot in enumerate(top5, 1):
+            lines.append(f"  {i}. {spot['name']} — {spot['busyness']}% busy")
+        lines.append("")
+    elif spots:
+        lines.append("  Venues discovered but busyness unknown.")
+        lines.append("  Set GOOGLE_PLACES_API_KEY to see which are busiest.")
         lines.append("")
 
-    lines.append("  📋 Trivia Night Prep:")
-    lines.append("")
-    hot_topics = [s for s in suggestions if s["strength"] == "HOT"]
-    warm_topics = [s for s in suggestions if s["strength"] == "Warm"]
-
-    if hot_topics:
-        topic_names = ", ".join(t["category"] for t in hot_topics[:3])
-        lines.append(f"  → Must-include categories: {topic_names}")
-    if warm_topics:
-        topic_names = ", ".join(t["category"] for t in warm_topics[:3])
-        lines.append(f"  → Good backup categories: {topic_names}")
-    lines.append("")
-
-    lines.append("  ⏰ Timing:")
-    lines.append("  → Post daytime flyers by 11am (catch the lunch crowd)")
-    lines.append("  → Post evening flyers by 6pm (dinner-to-bar transition)")
-    lines.append("  → Best nights: Tue, Wed, or Thu (less weekend competition)")
-    lines.append("")
-
-    lines.append("  📊 Data Sources Used:")
-    data_sources = ["Static spot database (10 curated locations)"]
-    if fetch_live_traffic:
-        data_sources.append("OpenStreetMap Overpass API (venue discovery)")
-        data_sources.append("Popular times estimation (hourly busyness)")
-        data_sources.append("NCDOT AADT vehicle counts")
-    if fetch_live_trends and not using_fallback:
-        data_sources.append("Google Trends (live interest + rising queries)")
-    else:
-        data_sources.append("Curated trend fallback data")
-    for ds in data_sources:
-        lines.append(f"  • {ds}")
+    lines.append("  📊 Data Sources:")
+    lines.append("  • OpenStreetMap Overpass API (venue discovery)")
+    if any(s.get("busyness") is not None for s in spots):
+        lines.append("  • Google Places API (live busyness)")
+    if ncdot:
+        lines.append("  • NCDOT ArcGIS (vehicle traffic counts)")
+    if has_data:
+        lines.append("  • Google Trends (live search interest)")
     lines.append("")
 
     lines.append("=" * 62)

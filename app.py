@@ -59,12 +59,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 from config import GOOGLE_PLACES_API_KEY, FRANKLIN_STREET_CENTER
-from spots import get_enriched_spots, get_ranked_spots, FRANKLIN_STREET_SPOTS
+from spots import get_enriched_spots
 from traffic import (
     build_heatmap_data,
     fetch_nearby_places,
     get_ncdot_traffic,
-    aggregate_busyness,
 )
 from trends import build_trends_report, generate_trivia_suggestions
 from satellite import TILE_SOURCES, PYDECK_VIEWS, get_folium_tile_layers
@@ -100,7 +99,6 @@ from osint import (
 )
 from forecast import (
     forecast_from_live_data,
-    simulate_event_impact,
     build_forecast_report,
 )
 from livefeed import build_live_feed
@@ -202,8 +200,7 @@ def load_spots(tod, hr, n):
 
 @st.cache_data(ttl=3600)
 def load_all_spots(hr):
-    spots = copy.deepcopy(FRANKLIN_STREET_SPOTS)
-    return aggregate_busyness(spots, hour=hr)
+    return get_enriched_spots(hour=hr, top_n=100)
 
 @st.cache_data(ttl=3600)
 def load_heatmap(hr, dow):
@@ -287,7 +284,7 @@ with tab_sat:
 
         # Add venue markers with full intelligence popups
         for i, spot in enumerate(spots, 1):
-            busyness = spot.get("live_busyness", 0)
+            busyness = spot.get("busyness") or spot.get("live_busyness") or 0
             walk = spot.get("walk_score", "N/A")
 
             if busyness >= 70:
@@ -300,34 +297,24 @@ with tab_sat:
                 color = "blue"
                 icon_color = "darkblue"
 
+            busyness_str = f"{busyness}%" if busyness else "no data"
             popup_html = f"""
-            <div style='width:320px; font-family: monospace; font-size: 11px;'>
-                <h3 style='color: #1a73e8; margin:0;'>#{i} {spot['name']}</h3>
+            <div style='width:280px; font-family: monospace; font-size: 11px;'>
+                <h3 style='color: #1a73e8; margin:0;'>{spot['name']}</h3>
                 <hr style='margin:4px 0;'>
                 <table style='width:100%;'>
-                    <tr><td><b>Score</b></td><td>{spot['composite_score']}/10</td></tr>
-                    <tr><td><b>Busyness</b></td><td>{busyness}%</td></tr>
-                    <tr><td><b>Foot Traffic</b></td><td>{spot['foot_traffic']}/10</td></tr>
-                    <tr><td><b>Dwell Time</b></td><td>{spot['dwell_time']}/10</td></tr>
-                    <tr><td><b>Visibility</b></td><td>{spot['visibility']}/10</td></tr>
-                    <tr><td><b>Student %</b></td><td>{spot['student_density']}/10</td></tr>
-                    <tr><td><b>Type</b></td><td>{spot.get('place_type', 'N/A')}</td></tr>
-                    <tr><td><b>Best Times</b></td>
-                        <td>{', '.join(spot['best_times'])}</td></tr>
+                    <tr><td><b>Busyness</b></td><td>{busyness_str}</td></tr>
+                    <tr><td><b>Type</b></td><td>{spot.get('amenity_type', 'N/A')}</td></tr>
                     <tr><td><b>Coords</b></td>
-                        <td>{spot['lat']:.4f}, {spot['lon']:.4f}</td></tr>
+                        <td>{spot['lat']:.5f}, {spot['lon']:.5f}</td></tr>
                 </table>
-                <hr style='margin:4px 0;'>
-                <b>INTEL:</b> {spot['rationale'][:200]}
-                <hr style='margin:4px 0;'>
-                <b>ACTION:</b> {spot['placement_tip'][:200]}
             </div>
             """
 
             folium.Marker(
                 location=[spot["lat"], spot["lon"]],
                 popup=folium.Popup(popup_html, max_width=350),
-                tooltip=f"#{i} {spot['name']} | {busyness}% busy | Score {spot['composite_score']}",
+                tooltip=f"{spot['name']} | {busyness or '?'}% busy",
                 icon=folium.Icon(
                     color=color, icon_color="white",
                     icon="crosshairs", prefix="fa",
@@ -442,7 +429,7 @@ with tab_heat:
 
         # Venue dots on top of heat
         for i, spot in enumerate(spots, 1):
-            busyness = spot.get("live_busyness", 0)
+            busyness = spot.get("busyness") or spot.get("live_busyness") or 0
             folium.CircleMarker(
                 location=[spot["lat"], spot["lon"]],
                 radius=10,
@@ -496,7 +483,7 @@ with tab_traffic:
     cols = st.columns(5)
     for i, spot in enumerate(all_spots):
         col = cols[i % 5]
-        busyness = spot.get("live_busyness", 0)
+        busyness = spot.get("busyness") or spot.get("live_busyness") or 0
         delta = None
         hourly = spot.get("hourly_profile", [])
         if hourly and selected_hour > 0:
@@ -943,24 +930,6 @@ with tab_forecast:
     for rec in forecast.get("recommendation", []):
         st.info(rec)
 
-    st.markdown("---")
-
-    # Event impact models
-    st.markdown("### ⚡ Event Impact Models")
-    st.caption("Multipliers from published urban planning research")
-    event_types = [
-        "basketball_home_game", "basketball_win_rush",
-        "football_home_game", "exam_period", "severe_weather",
-    ]
-    event_type = st.selectbox("Event type", event_types)
-    sim = simulate_event_impact(event_type)
-    if "error" not in sim:
-        c1, c2 = st.columns(2)
-        c1.metric("Traffic Multiplier", f"{sim['multiplier']}x")
-        c2.metric("Range", f"{sim['range'][0]}x — {sim['range'][1]}x")
-        st.markdown(f"**Source:** {sim['source']}")
-        st.markdown(f"**Note:** {sim['note']}")
-        st.caption(sim["disclaimer"])
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,22 +1,16 @@
 """
 ==============================================
   FRANKLIN STREET PANOPTICON v3
-  Spatial Analysis (Honest)
+  Spatial Analysis
 ==============================================
-Only analyses that work on real inputs:
-  - Isochrones: geometric walk-time rings (real coordinates)
-  - Gravity model: destination probability (real distances)
-  - Optimal placement: greedy facility location (real positions)
-  - Pareto frontier: dominance on real metric dimensions
-
-Removed: KDE, DBSCAN, Voronoi, hexbins — these require
-real observed point data, not 10 guessed scores.
+Geometric analyses on real venue positions:
+  - Isochrones: walk-time rings from venue coordinates
+  - Gravity model: destination probability from real distances + busyness
+  - Optimal placement: greedy facility location with distance constraints
 """
 
 import math
 from datetime import datetime
-
-from config import FRANKLIN_STREET_CENTER
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +36,7 @@ def haversine(lat1, lon1, lat2, lon2):
 # ---------------------------------------------------------------------------
 
 def compute_isochrones(center_lat, center_lon, times_min=None):
-    """
-    Compute walk-time isochrone rings from a center point.
-    Uses radial approximation at 4.5 km/h walking speed.
-
-    These are geometric — for network-aware isochrones,
-    use OSRM or Valhalla API.
-    """
+    """Walk-time rings at 4.5 km/h. Geometric approximation."""
     if times_min is None:
         times_min = [3, 5, 10]
 
@@ -79,7 +67,7 @@ def compute_isochrones(center_lat, center_lon, times_min=None):
 
 
 def compute_isochrones_for_spots(spots, times_min=None):
-    """Compute isochrones for all spots."""
+    """Compute isochrones for a list of spots."""
     if times_min is None:
         times_min = [3, 5]
 
@@ -88,7 +76,7 @@ def compute_isochrones_for_spots(spots, times_min=None):
         iso = compute_isochrones(spot["lat"], spot["lon"], times_min=times_min)
         results.append({
             "spot_name": spot["name"],
-            "spot_id": spot["id"],
+            "spot_id": spot.get("id"),
             "lat": spot["lat"],
             "lon": spot["lon"],
             "isochrones": iso,
@@ -97,31 +85,24 @@ def compute_isochrones_for_spots(spots, times_min=None):
 
 
 # ---------------------------------------------------------------------------
-# Gravity Model (Real Distances)
+# Gravity Model (Real Distances + Busyness)
 # ---------------------------------------------------------------------------
 
 def gravity_model(spots, origin_lat, origin_lon):
     """
-    Huff/Gravity model: predict probability of visiting each spot
-    from a given origin point.
-
-    P(visit i) = (A_i / d_i^2) / sum(A_j / d_j^2)
-
-    Uses composite_score as attractiveness. If live_busyness is available,
-    uses that instead (actual data > editorial estimate).
+    Huff/Gravity model: predict visit probability from an origin point.
+    Uses busyness as attractiveness. If no busyness, venue is excluded.
     """
     scores = []
     for spot in spots:
         dist = haversine(origin_lat, origin_lon, spot["lat"], spot["lon"])
         dist = max(dist, 0.01)
 
-        # Prefer live data over editorial estimates
-        if spot.get("live_busyness") is not None:
-            attractiveness = spot["live_busyness"] / 10.0
-        else:
-            attractiveness = spot.get("composite_score", 5)
+        busyness = spot.get("busyness") or spot.get("live_busyness")
+        if busyness is None:
+            continue
 
-        gravity = attractiveness / (dist ** 2)
+        gravity = busyness / (dist ** 2)
         scores.append((spot, gravity, dist))
 
     total = sum(g for _, g, _ in scores)
@@ -133,10 +114,9 @@ def gravity_model(spots, origin_lat, origin_lon):
         prob = gravity / total
         result.append({
             "spot_name": spot["name"],
-            "spot_id": spot["id"],
             "probability_pct": round(prob * 100, 1),
             "distance_m": round(dist * 1000),
-            "data_source": "live_busyness" if spot.get("live_busyness") is not None else "editorial_estimate",
+            "busyness": spot.get("busyness") or spot.get("live_busyness"),
         })
 
     result.sort(key=lambda r: r["probability_pct"], reverse=True)
@@ -144,88 +124,44 @@ def gravity_model(spots, origin_lat, origin_lon):
 
 
 # ---------------------------------------------------------------------------
-# Pareto Frontier
-# ---------------------------------------------------------------------------
-
-def pareto_frontier(spots):
-    """
-    Identify Pareto-optimal spots — spots where no other spot
-    beats them on ALL metrics simultaneously.
-
-    NOTE: Uses editorial estimates (foot_traffic, dwell_time, etc.)
-    These are not measured data.
-    """
-    objectives = ["foot_traffic", "dwell_time", "visibility", "student_density"]
-    n = len(spots)
-    is_pareto = [True] * n
-
-    for i in range(n):
-        for j in range(n):
-            if i == j:
-                continue
-            dominates_all = all(
-                spots[j].get(obj, 0) >= spots[i].get(obj, 0)
-                for obj in objectives
-            )
-            dominates_one = any(
-                spots[j].get(obj, 0) > spots[i].get(obj, 0)
-                for obj in objectives
-            )
-            if dominates_all and dominates_one:
-                is_pareto[i] = False
-                break
-
-    result = []
-    for i, spot in enumerate(spots):
-        result.append({
-            "spot_name": spot["name"],
-            "spot_id": spot["id"],
-            "is_pareto": is_pareto[i],
-            "scores": {obj: spot.get(obj, 0) for obj in objectives},
-            "data_source": "editorial_estimates",
-        })
-
-    result.sort(key=lambda r: (not r["is_pareto"], -sum(r["scores"].values())))
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Optimal Placement (Greedy Facility Location)
+# Optimal Placement (Greedy, by Busyness + Spacing)
 # ---------------------------------------------------------------------------
 
 def optimize_placement(spots, k=5, min_distance_km=0.05):
     """
-    Select k spots maximizing coverage with minimum spacing.
-    Greedy approximation to the maximal coverage problem.
+    Select k venues maximizing busyness coverage with minimum spacing.
+    Only considers venues with busyness data.
     """
-    selected = []
-    remaining = list(range(len(spots)))
-    remaining.sort(key=lambda i: spots[i].get("composite_score", 0), reverse=True)
+    # Filter to venues with busyness
+    ranked = [
+        s for s in spots
+        if (s.get("busyness") or s.get("composite_score", 0)) > 0
+    ]
+    ranked.sort(
+        key=lambda s: s.get("busyness") or s.get("composite_score", 0),
+        reverse=True,
+    )
 
-    while len(selected) < k and remaining:
-        candidate = remaining.pop(0)
-        too_close = False
-        for sel_idx in selected:
-            dist = haversine(
-                spots[candidate]["lat"], spots[candidate]["lon"],
-                spots[sel_idx]["lat"], spots[sel_idx]["lon"],
-            )
-            if dist < min_distance_km:
-                too_close = True
-                break
+    selected = []
+    for candidate in ranked:
+        if len(selected) >= k:
+            break
+        too_close = any(
+            haversine(candidate["lat"], candidate["lon"], sel["lat"], sel["lon"]) < min_distance_km
+            for sel in selected
+        )
         if not too_close:
             selected.append(candidate)
 
     return [
         {
             "rank": i + 1,
-            "spot_name": spots[idx]["name"],
-            "spot_id": spots[idx]["id"],
-            "composite_score": spots[idx].get("composite_score", 0),
-            "lat": spots[idx]["lat"],
-            "lon": spots[idx]["lon"],
+            "spot_name": s["name"],
+            "busyness": s.get("busyness") or s.get("composite_score", 0),
+            "lat": s["lat"],
+            "lon": s["lon"],
         }
-        for i, idx in enumerate(selected)
+        for i, s in enumerate(selected)
     ]
 
 
@@ -234,20 +170,21 @@ def optimize_placement(spots, k=5, min_distance_km=0.05):
 # ---------------------------------------------------------------------------
 
 def build_spatial_analysis(spots, hour=None):
-    """Run spatial analyses on spots. Labels data provenance clearly."""
-    pareto = pareto_frontier(spots)
+    """Run spatial analyses. Only uses real data (positions + busyness)."""
     optimal = optimize_placement(spots, k=5)
-    top3 = sorted(spots, key=lambda s: s.get("composite_score", 0), reverse=True)[:3]
-    isochrones = compute_isochrones_for_spots(top3, times_min=[3, 5])
+    top3 = sorted(
+        [s for s in spots if s.get("busyness") is not None],
+        key=lambda s: s.get("busyness", 0),
+        reverse=True,
+    )[:3]
+
+    # Only compute isochrones if we have venues
+    isochrones = compute_isochrones_for_spots(top3, times_min=[3, 5]) if top3 else []
 
     return {
-        "pareto_frontier": pareto,
-        "pareto_optimal_count": sum(1 for p in pareto if p["is_pareto"]),
         "optimal_placement": optimal,
         "isochrones": isochrones,
-        "note": (
-            "Pareto and placement use editorial estimates from spots.py. "
-            "Gravity model uses live_busyness when available from Google Places API."
-        ),
+        "venue_count": len(spots),
+        "venues_with_busyness": sum(1 for s in spots if s.get("busyness") is not None),
         "timestamp": datetime.now().isoformat(),
     }
