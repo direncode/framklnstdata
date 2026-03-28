@@ -308,101 +308,81 @@ def get_ncdot_traffic():
 
 def build_heatmap_data(spots, hour=None, day_of_week=None):
     """
-    Build heat map data points for folium HeatMap visualization.
+    Build heat map from venue busyness data.
 
-    Takes the spots list, gets busyness for each, then interpolates
-    additional points along the Franklin Street spine to create a
-    continuous heat corridor effect.
+    Simple and honest:
+    1. Each venue with live busyness (Google Places) → point with real weight
+    2. Each OSM-discovered venue → point (we know it exists, weight = existence)
+    3. Linear interpolation between venues along the street spine
+       so the heat map shows a corridor, not isolated blobs
+
+    When Google Places API is unavailable, the heat map only shows
+    venue locations (existence) not busyness intensity.
 
     Returns list of [lat, lon, weight] for folium.plugins.HeatMap.
     """
     if hour is None:
         hour = datetime.now().hour
-    if day_of_week is None:
-        day_of_week = datetime.now().weekday()
 
     heatmap_points = []
+    venue_weights = {}  # {(lat, lon): weight} for interpolation
 
-    # 1. Add venue points with live busyness (if available)
-    spot_busyness = {}
-    has_live_data = False
+    # 1. Curated spots — use live busyness if available, else just mark location
     for spot in spots:
         busyness = get_current_busyness(
-            spot["name"],
-            spot.get("place_id"),
-            hour=hour,
+            spot["name"], spot.get("place_id"), hour=hour,
         )
         if busyness is not None:
-            has_live_data = True
-            spot_busyness[spot["name"]] = busyness
+            # Real data from Google Places API
             weight = busyness / 100.0
-            if weight > 0:
-                heatmap_points.append([spot["lat"], spot["lon"], weight])
         else:
-            # Use static foot_traffic score as weight proxy (from spots.py)
-            ft = spot.get("foot_traffic", 5)
-            spot_busyness[spot["name"]] = ft * 10
-            heatmap_points.append([spot["lat"], spot["lon"], ft / 10.0])
+            # No busyness data — just mark that a venue exists here
+            weight = 0.3
+        venue_weights[(spot["lat"], spot["lon"])] = weight
+        heatmap_points.append([spot["lat"], spot["lon"], weight])
 
-    # 2. Add discovered OSM venues as points (uniform weight — no fake busyness)
+    # 2. OSM-discovered venues — existence signal only
     try:
         osm_places = fetch_nearby_places()
         for place in osm_places:
-            # OSM venues get a base weight — we know they exist, not how busy
-            heatmap_points.append([place["lat"], place["lon"], 0.3])
+            # We know a venue is here. That's all we know.
+            venue_weights[(place["lat"], place["lon"])] = 0.2
+            heatmap_points.append([place["lat"], place["lon"], 0.2])
     except Exception:
         pass
 
-    # 3. Interpolate along the Franklin Street spine for continuity
-    if len(heatmap_points) >= 2:
-        _interpolate_spine(heatmap_points, spots, spot_busyness)
-
-    return heatmap_points
-
-
-def _interpolate_spine(heatmap_points, spots, spot_busyness):
-    """
-    Add interpolated points along the Franklin Street spine
-    between known venues for a continuous heat corridor.
-    """
+    # 3. Interpolate along the Franklin Street spine
+    #    Linear blend between nearest venue weights on each side.
+    #    This creates a continuous corridor instead of isolated dots.
     for i in range(len(FRANKLIN_STREET_SPINE) - 1):
         lat1, lon1 = FRANKLIN_STREET_SPINE[i]
         lat2, lon2 = FRANKLIN_STREET_SPINE[i + 1]
 
-        # Find nearest known spots to this segment for weight interpolation
-        w1 = _nearest_spot_busyness(lat1, lon1, spots, spot_busyness)
-        w2 = _nearest_spot_busyness(lat2, lon2, spots, spot_busyness)
+        w1 = _nearest_weight(lat1, lon1, venue_weights)
+        w2 = _nearest_weight(lat2, lon2, venue_weights)
 
-        # Generate 5 intermediate points per segment
-        for j in range(1, 6):
-            t = j / 6.0
-            lat_interp = lat1 + t * (lat2 - lat1)
-            lon_interp = lon1 + t * (lon2 - lon1)
-            weight_interp = (w1 + t * (w2 - w1)) / 100.0
+        # 4 intermediate points per segment, linearly blended
+        for j in range(1, 5):
+            t = j / 5.0
+            lat_mid = lat1 + t * (lat2 - lat1)
+            lon_mid = lon1 + t * (lon2 - lon1)
+            weight_mid = w1 + t * (w2 - w1)
+            if weight_mid > 0.05:
+                heatmap_points.append([lat_mid, lon_mid, weight_mid * 0.6])
 
-            if weight_interp > 0.02:
-                # Slight random-ish offset to avoid a perfect line
-                lat_offset = ((j * 7) % 5 - 2) * 0.00003
-                lon_offset = ((j * 11) % 5 - 2) * 0.00003
-                heatmap_points.append([
-                    lat_interp + lat_offset,
-                    lon_interp + lon_offset,
-                    weight_interp * 0.5,  # Interpolated points are fainter
-                ])
+    return heatmap_points
 
 
-def _nearest_spot_busyness(lat, lon, spots, spot_busyness):
-    """Find the busyness of the nearest known spot to a given point."""
+def _nearest_weight(lat, lon, venue_weights):
+    """Find the weight of the nearest venue to a point."""
     best_dist = float("inf")
-    best_busyness = 0
-
-    for spot in spots:
-        dist = abs(spot["lat"] - lat) + abs(spot["lon"] - lon)
+    best_weight = 0
+    for (vlat, vlon), weight in venue_weights.items():
+        dist = abs(vlat - lat) + abs(vlon - lon)
         if dist < best_dist:
             best_dist = dist
-            best_busyness = spot_busyness.get(spot["name"], 0)
-
-    return best_busyness
+            best_weight = weight
+    return best_weight
 
 
 # ---------------------------------------------------------------------------

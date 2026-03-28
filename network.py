@@ -158,7 +158,7 @@ def find_intersections(network=None):
         network = fetch_street_network()
 
     if network.get("fallback"):
-        return _fallback_intersections()
+        return []  # No fake data — need live network
 
     # Count degree of each node
     degree = {}
@@ -184,20 +184,6 @@ def find_intersections(network=None):
     return intersections
 
 
-def _fallback_intersections():
-    """Curated fallback intersections when network data unavailable."""
-    return [
-        {"lat": 35.9131, "lon": -79.0540, "degree": 6, "connectivity_score": 10,
-         "name": "Franklin & Columbia"},
-        {"lat": 35.9130, "lon": -79.0562, "degree": 5, "connectivity_score": 10,
-         "name": "Franklin & Henderson"},
-        {"lat": 35.9134, "lon": -79.0520, "degree": 4, "connectivity_score": 8,
-         "name": "Franklin & Church"},
-        {"lat": 35.9128, "lon": -79.0575, "degree": 4, "connectivity_score": 8,
-         "name": "Franklin & Merritt Mill"},
-        {"lat": 35.9133, "lon": -79.0548, "degree": 4, "connectivity_score": 8,
-         "name": "Franklin & Roberson"},
-    ]
 
 
 # ---------------------------------------------------------------------------

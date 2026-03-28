@@ -53,26 +53,25 @@ from traffic import (
 from trends import (
     build_trends_report,
     generate_trivia_suggestions,
-    FALLBACK_TRENDS,
 )
 from intel import (
     build_intel_report,
-    get_demographics,
+    fetch_demographics,
     fetch_weather,
-    get_event_context,
-    get_social_signals,
+    fetch_unc_events,
 )
 from spatial import build_spatial_analysis
 from buildings import fetch_building_footprints, compute_viewshed_for_spots
 from osint import (
     build_deep_osint_report,
-    get_venue_intelligence,
-    get_sentiment_rankings,
-    get_crime_data,
-    get_transit_data,
+    fetch_crime_data,
+    fetch_transit_stops,
+    fetch_abc_licenses,
+    fetch_all_reddit,
     estimate_pedestrian_flow,
 )
-from forecast import build_forecast_report, forecast_traffic, simulate_event_impact
+from forecast import build_forecast_report, simulate_event_impact
+from livefeed import build_live_feed
 from network import (
     fetch_street_network,
     find_intersections,
@@ -164,11 +163,11 @@ def handle_status():
         "version": API_VERSION,
         "timestamp": datetime.now().isoformat(),
         "data_feeds": {
-            "google_places": "active" if GOOGLE_PLACES_API_KEY else "fallback",
+            "google_places": "active" if GOOGLE_PLACES_API_KEY else "no_key",
             "openstreetmap": "active",
             "ncdot_aadt": "active",
             "census": "active",
-            "weather": "active" if os.environ.get("OPENWEATHER_API_KEY") else "fallback",
+            "weather": "active" if os.environ.get("OPENWEATHER_API_KEY") else "no_key",
             "google_trends": "available",
             "street_network": "active",
         },
@@ -371,15 +370,18 @@ def handle_intel():
 
 
 def handle_demographics():
-    return get_demographics()
+    data = fetch_demographics()
+    return data if data else {"error": "Set CENSUS_API_KEY env var"}
 
 
 def handle_weather():
-    return fetch_weather()
+    data = fetch_weather()
+    return data if data else {"error": "Set OPENWEATHER_API_KEY env var"}
 
 
 def handle_events():
-    return get_event_context()
+    data = fetch_unc_events()
+    return data if data else {"error": "UNC Calendar unavailable"}
 
 
 def handle_network():
@@ -457,44 +459,38 @@ def handle_osint():
     return build_deep_osint_report()
 
 
-def handle_sentiment():
-    """Venue sentiment rankings."""
-    return {
-        "rankings": get_sentiment_rankings(),
-        "venue_details": get_venue_intelligence(),
-        "timestamp": datetime.now().isoformat(),
-    }
+def handle_reddit():
+    """Live Reddit feed."""
+    data = fetch_all_reddit()
+    return data if data else {"error": "Reddit unavailable"}
 
 
 def handle_crime():
-    """Crime data intelligence."""
-    return get_crime_data()
+    """Crime data from Chapel Hill ArcGIS."""
+    data = fetch_crime_data()
+    return data if data else {"error": "Crime data unavailable"}
 
 
 def handle_transit():
-    """Transit route intelligence."""
-    return get_transit_data()
+    """Transit stops from GTFS."""
+    data = fetch_transit_stops()
+    return data if data else {"error": "Transit data unavailable"}
 
 
-def handle_pedestrians(params):
-    """Pedestrian flow estimate."""
-    hour = _parse_hour(params.get("hour", [None])[0])
-    day = _parse_day(params.get("day", [None])[0])
-    return estimate_pedestrian_flow(hour=hour, day_of_week=day)
+def handle_livefeed():
+    """Live keyword feed from all sources."""
+    return build_live_feed()
 
 
 def handle_forecast(params):
-    """Traffic forecast."""
-    hours = int(params.get("hours", ["24"])[0])
-    return build_forecast_report(hours_ahead=hours)
+    """Live signal forecast."""
+    return build_forecast_report()
 
 
 def handle_simulate(params):
     """Event impact simulation."""
-    event_type = params.get("event", ["basketball_win"])[0]
-    hour = _parse_hour(params.get("hour", ["19"])[0])
-    day = _parse_day(params.get("day", [None])[0])
-    return simulate_event_impact(event_type, event_hour=hour, day_of_week=day)
+    event_type = params.get("event", ["basketball_home_game"])[0]
+    return simulate_event_impact(event_type)
 
 
 def handle_export(params):
@@ -547,10 +543,10 @@ class PanopticonHandler(BaseHTTPRequestHandler):
             "/buildings": handle_buildings,
             "/viewshed": lambda: handle_viewshed(params),
             "/osint": handle_osint,
-            "/osint/sentiment": handle_sentiment,
+            "/osint/reddit": handle_reddit,
             "/osint/crime": handle_crime,
             "/osint/transit": handle_transit,
-            "/osint/pedestrians": lambda: handle_pedestrians(params),
+            "/livefeed": handle_livefeed,
             "/forecast": lambda: handle_forecast(params),
             "/forecast/simulate": lambda: handle_simulate(params),
             "/report": lambda: handle_report(params),

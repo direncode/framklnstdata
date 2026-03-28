@@ -1,20 +1,26 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v2
-  Location Database (Hybrid Static + Live)
+  FRANKLIN STREET PANOPTICON v3
+  Location Database
 ==============================================
-Curated high-visibility spots on/near Franklin Street.
+10 curated high-visibility spots on/near Franklin Street.
 
-Static scores (1-10) provide the baseline. When live busyness data is
-available (via traffic.py), it's merged in for real-time ranking.
+IMPORTANT: The 1-10 scores below are EDITORIAL ESTIMATES based on
+the author's knowledge of Franklin Street. They are NOT measured data.
+They represent informed guesses about relative foot traffic, dwell time,
+visibility, and student density at each location.
+
+When live busyness data is available from Google Places API
+(via traffic.py), it replaces the editorial foot_traffic score
+for ranking purposes.
 
 Fields:
-  - foot_traffic: baseline pedestrian volume (1-10)
-  - dwell_time: how long people linger (1-10)
-  - visibility: how easy to see a flyer/QR code (1-10)
-  - student_density: proportion that's UNC students (1-10)
-  - place_id: Google Places ID (for populartimes API, optional)
-  - place_type: venue category for pattern matching
+  - foot_traffic: EDITORIAL ESTIMATE of pedestrian volume (1-10)
+  - dwell_time: EDITORIAL ESTIMATE of lingering time (1-10)
+  - visibility: EDITORIAL ESTIMATE of flyer/QR visibility (1-10)
+  - student_density: EDITORIAL ESTIMATE of UNC student proportion (1-10)
+  - place_id: Google Places ID (for live busyness API)
+  - place_type: venue category
 """
 
 import copy
@@ -295,33 +301,35 @@ def get_enriched_spots(time_of_day="evening", hour=None, top_n=8):
     try:
         from traffic import aggregate_busyness
         spots = aggregate_busyness(spots, hour=hour)
-        has_live = any(s.get("live_busyness", 0) > 0 for s in spots)
+        has_live = any(s.get("live_busyness") is not None for s in spots)
     except Exception:
         has_live = False
 
     for spot in spots:
-        if has_live and "live_busyness" in spot:
-            # Normalize live_busyness (0-100) to 1-10 scale
-            live_ft = max(1, round(spot["live_busyness"] / 10))
+        busyness = spot.get("live_busyness")
+
+        if has_live and busyness is not None:
+            # Live data: replace editorial foot_traffic with real busyness
+            # Normalize 0-100 to 1-10 scale
+            live_ft = max(1, round(busyness / 10))
 
             if time_of_day == "evening":
                 score = (
-                    live_ft * 0.30
-                    + spot["dwell_time"] * 0.20
-                    + spot["visibility"] * 0.20
-                    + spot["student_density"] * 0.15
-                    + (spot["live_busyness"] / 100 * 10) * 0.15
+                    live_ft * 0.35           # Live busyness (replaces editorial foot_traffic)
+                    + spot["dwell_time"] * 0.20   # Editorial estimate
+                    + spot["visibility"] * 0.25    # Editorial estimate
+                    + spot["student_density"] * 0.20  # Editorial estimate
                 )
             else:
                 score = (
                     live_ft * 0.25
-                    + spot["dwell_time"] * 0.25
-                    + spot["visibility"] * 0.20
-                    + spot["student_density"] * 0.15
-                    + (spot["live_busyness"] / 100 * 10) * 0.15
+                    + spot["dwell_time"] * 0.30
+                    + spot["visibility"] * 0.25
+                    + spot["student_density"] * 0.20
                 )
+            spot["score_source"] = "live_busyness + editorial_estimates"
         else:
-            # Fallback to static scoring
+            # No live data: pure editorial estimates
             if time_of_day == "evening":
                 score = (
                     spot["foot_traffic"] * 0.35
@@ -336,6 +344,7 @@ def get_enriched_spots(time_of_day="evening", hour=None, top_n=8):
                     + spot["visibility"] * 0.25
                     + spot["student_density"] * 0.20
                 )
+            spot["score_source"] = "editorial_estimates_only"
 
         spot["composite_score"] = round(score, 2)
 
