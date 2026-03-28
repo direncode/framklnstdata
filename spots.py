@@ -155,11 +155,11 @@ def _poll_search_job(job_id, max_wait=60):
 def besttime_venue_filter(hour=None, day_of_week=None):
     """
     Filter all forecasted venues for busyness at a specific day/hour.
-    Uses the public key (no credit cost for filtering).
+    Uses the private key with the filter endpoint.
 
     Returns list of venues with busyness data.
     """
-    if not BESTTIME_PUBLIC_KEY:
+    if not BESTTIME_PRIVATE_KEY:
         return None
 
     if hour is None:
@@ -173,22 +173,22 @@ def besttime_venue_filter(hour=None, day_of_week=None):
         return cached
 
     lat, lon = FRANKLIN_STREET_CENTER
-    bounds = FRANKLIN_STREET_BOUNDS
 
     try:
         resp = requests.get(
             f"{BESTTIME_BASE}/venues/filter",
             params={
-                "api_key_public": BESTTIME_PUBLIC_KEY,
+                "api_key_private": BESTTIME_PRIVATE_KEY,
                 "lat": lat,
                 "lng": lon,
                 "radius": 500,
                 "day_int": day_of_week,
-                "hour": hour,
+                "hour_min": hour,
+                "hour_max": hour,
                 "types": "BAR,RESTAURANT,CAFE,CLUB,PUB,NIGHT_CLUB",
                 "order_by": "day_rank_max",
                 "order": "desc",
-                "foot_traffic": "true",
+                "foot_traffic": "both",
                 "limit": 100,
             },
             timeout=20,
