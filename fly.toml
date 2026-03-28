@@ -1,4 +1,4 @@
-app = "franklin-panopticon"
+app = "franklin-street-data"
 primary_region = "iad"
 
 [build]

@@ -137,7 +137,7 @@ export default function VenuePanel({
           <div className="px-4 py-8 text-center text-xs text-[#454a58]">
             No venues discovered.
             <br />
-            Connect to the Panopticon API to scan Franklin Street.
+            Connect to the Franklin Street Data API to scan Franklin Street.
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Live OSINT Module
 ==============================================
 All data is API-fetched. No hardcoded fake data.
@@ -186,7 +186,7 @@ def fetch_reddit_posts(subreddit="UNC", limit=25):
 
     try:
         resp = requests.get(url, timeout=15, headers={
-            "User-Agent": "PanopticonBot/1.0 (academic research tool)",
+            "User-Agent": "FranklinStDataBot/1.0 (academic research tool)",
         })
         resp.raise_for_status()
         data = resp.json()
@@ -247,7 +247,7 @@ def fetch_abc_licenses():
 
     try:
         resp = requests.get(url, timeout=15, headers={
-            "User-Agent": "PanopticonBot/1.0 (academic research tool)",
+            "User-Agent": "FranklinStDataBot/1.0 (academic research tool)",
         })
         if resp.status_code != 200:
             return None

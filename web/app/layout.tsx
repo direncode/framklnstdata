@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Franklin Street Panopticon",
+  title: "Franklin Street Data",
   description: "Surveillance-grade intelligence platform for Franklin Street, UNC Chapel Hill",
 };
 

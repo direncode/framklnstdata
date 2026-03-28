@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Surveillance-Grade Intelligence Platform
   UNC Chapel Hill · Franklin Street
 ==============================================
 
-Run standalone:   python panopticon.py
+Run standalone:   python franklinst.py
 Run as web app:   streamlit run app.py
 Run as API:       python datastream.py
 
@@ -61,7 +61,7 @@ def generate_report(
     hour=None,
 ):
     """
-    Generate the complete Franklin Street Panopticon v2 report.
+    Generate the complete Franklin Street Data report.
     Returns the report as a string.
     """
     lines = []
@@ -72,7 +72,7 @@ def generate_report(
 
     lines.append("")
     lines.append("=" * 62)
-    lines.append("   ███ FRANKLIN STREET PANOPTICON v3 ███")
+    lines.append("   ███ FRANKLIN STREET DATA ███")
     lines.append("   Trivia Night Surveillance Report")
     lines.append(f"   Generated: {now.strftime('%B %d, %Y at %I:%M %p')}")
     lines.append(f"   Day: {day_name} | Analysis hour: {hour}:00")
@@ -231,7 +231,7 @@ def generate_report(
     lines.append("")
 
     lines.append("=" * 62)
-    lines.append("   ███ End of Panopticon Report — Go crush trivia night! ███")
+    lines.append("   ███ End of Report — Go crush trivia night! ███")
     lines.append("=" * 62)
 
     return "\n".join(lines)
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Franklin Street Panopticon v2 — Trivia Night Optimizer"
+        description="Franklin Street Data — Trivia Night Optimizer"
     )
     parser.add_argument(
         "--time",
@@ -285,7 +285,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print()
-    print("  ███ Starting Franklin Street Panopticon v3...")
+    print("  ███ Starting Franklin Street Data...")
     print()
 
     report = generate_report(

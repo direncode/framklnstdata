@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Live Signal Forecast
 ==============================================
 Forecasting based on live data feeds only.

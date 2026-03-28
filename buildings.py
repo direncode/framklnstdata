@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   3D Building Footprints & Structure Layer
 ==============================================
 Fetches building footprints from OpenStreetMap,

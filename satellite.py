@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Satellite & Aerial Imagery Layer System
 ==============================================
 Provides multiple map tile sources including satellite,

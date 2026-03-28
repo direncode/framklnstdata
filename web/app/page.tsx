@@ -38,7 +38,7 @@ interface FeedData {
   }>;
 }
 
-const API_BASE = "/api/panopticon";
+const API_BASE = "/api/data";
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("map");
@@ -183,7 +183,7 @@ export default function Home() {
             <div className="text-center">
               <div className="text-[#454a58] text-sm">Loading live feed...</div>
               <div className="text-[#454a58] text-xs mt-2">
-                Connect to Panopticon API for Reddit, DTH, UNC Calendar, and Trends data
+                Connect to Franklin Street Data API for Reddit, DTH, UNC Calendar, and Trends data
               </div>
             </div>
           </div>
@@ -212,7 +212,7 @@ export default function Home() {
                   {apiConnected ? "LIVE" : "OFFLINE"}
                 </div>
                 <div className="text-[10px] text-[#454a58] mt-1">
-                  {apiConnected ? "All feeds active" : "Set PANOPTICON_BACKEND_URL"}
+                  {apiConnected ? "All feeds active" : "Set BACKEND_URL"}
                 </div>
               </div>
             </div>
@@ -220,7 +220,7 @@ export default function Home() {
             {/* How it works */}
             <div className="border border-[#1e2028] rounded-lg p-6 bg-[#111318]">
               <h3 className="text-xs font-mono text-[#6b7080] uppercase tracking-wider mb-4">
-                How the Panopticon Works
+                How Franklin Street Data Works
               </h3>
               <div className="space-y-3 text-xs text-[#6b7080] leading-relaxed">
                 <div className="flex gap-3">

@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Spatial Analysis
 ==============================================
 Geometric analyses on real venue positions:

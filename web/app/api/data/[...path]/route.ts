@@ -3,14 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * Proxy API route: forwards requests to the Python datastream.py backend.
  *
- * In production, set PANOPTICON_BACKEND_URL to point to the Python server.
+ * In production, set BACKEND_URL to point to the Python server.
  * For Vercel deployment, the Python backend runs separately (e.g., Railway, Render).
  *
  * If no backend is configured, returns empty/null responses so the
  * frontend renders gracefully with "no data" states.
  */
 
-const BACKEND = process.env.PANOPTICON_BACKEND_URL || "";
+const BACKEND = process.env.BACKEND_URL || "";
 
 export async function GET(
   request: NextRequest,
@@ -79,6 +79,6 @@ function emptyResponse(path: string): Record<string, unknown> {
     case "/weather":
       return { unavailable: true };
     default:
-      return { error: "Set PANOPTICON_BACKEND_URL to connect to Python backend" };
+      return { error: "Set BACKEND_URL to connect to Python backend" };
   }
 }

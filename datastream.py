@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Physical Data API (Datastream)
 ==============================================
 
-A REST API that serves the entire Panopticon intelligence
+A REST API that serves the entire Franklin Street Data intelligence
 as consumable JSON endpoints. Designed for physical data
 interpretation — decision-makers can query real-time
 foot traffic, venue intelligence, trend signals, and
@@ -78,11 +78,11 @@ from network import (
     compute_walk_scores,
     get_network_lines,
 )
-from panopticon import generate_report
+from main import generate_report
 
 # Version
 API_VERSION = "3.0.0"
-API_NAME = "Franklin Street Panopticon Datastream"
+API_NAME = "Franklin Street Data Datastream"
 
 
 # ---------------------------------------------------------------------------
@@ -511,8 +511,8 @@ def handle_export(params):
 # HTTP Server
 # ---------------------------------------------------------------------------
 
-class PanopticonHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the Panopticon Datastream API."""
+class DataHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the Franklin Street Data API API."""
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -590,7 +590,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Franklin Street Panopticon Datastream API"
+        description="Franklin Street Data Datastream API"
     )
     parser.add_argument(
         "--port", type=int, default=8765,
@@ -603,7 +603,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print()
-    print("  ███ FRANKLIN STREET PANOPTICON v3 ███")
+    print("  ███ FRANKLIN STREET DATA ███")
     print("  ═══ Datastream API ═══")
     print()
     print(f"  Serving on http://{args.host}:{args.port}")
@@ -622,7 +622,7 @@ if __name__ == "__main__":
     print("    /export          Complete data export")
     print()
 
-    server = HTTPServer((args.host, args.port), PanopticonHandler)
+    server = HTTPServer((args.host, args.port), DataHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

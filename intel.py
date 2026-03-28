@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Live Intelligence Module
 ==============================================
 All data is API-fetched or not included.
@@ -210,7 +210,7 @@ def fetch_unc_events():
 
     try:
         resp = requests.get(url, timeout=15, headers={
-            "User-Agent": "PanopticonBot/1.0 (academic research tool)",
+            "User-Agent": "FranklinStDataBot/1.0 (academic research tool)",
         })
         resp.raise_for_status()
         data = resp.json()

@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Live Keyword Feed
 ==============================================
 Real-time monitoring of UNC / Chapel Hill keywords
@@ -82,7 +82,7 @@ def fetch_reddit_feed(subreddits=None, limit=15):
         url = f"https://www.reddit.com/r/{sub}/new.json?limit={limit}"
         try:
             resp = requests.get(url, timeout=10, headers={
-                "User-Agent": "PanopticonBot/1.0 (UNC academic tool)",
+                "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
             })
             if resp.status_code == 200:
                 data = resp.json()
@@ -129,7 +129,7 @@ def fetch_dth_feed():
 
     try:
         resp = requests.get(url, timeout=10, headers={
-            "User-Agent": "PanopticonBot/1.0 (UNC academic tool)",
+            "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
         })
         resp.raise_for_status()
 
@@ -239,7 +239,7 @@ def fetch_unc_events_feed():
 
     try:
         resp = requests.get(url, timeout=15, headers={
-            "User-Agent": "PanopticonBot/1.0 (UNC academic tool)",
+            "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
         })
         resp.raise_for_status()
         data = resp.json()

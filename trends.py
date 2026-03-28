@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Search Interpretation Engine (Live Only)
 ==============================================
 All data fetched from Google Trends via pytrends.

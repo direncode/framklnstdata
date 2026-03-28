@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v2
+  FRANKLIN STREET DATA
   Live Foot Traffic Engine
 ==============================================
 Fetches real-time busyness data from Google Places,

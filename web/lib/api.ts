@@ -1,9 +1,9 @@
 /**
- * Panopticon API client.
+ * Franklin Street Data API client.
  * Talks to the Python datastream.py backend or Next.js API routes.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/panopticon";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/data";
 
 export interface Venue {
   id: number;

@@ -17,7 +17,7 @@ export default function TopBar() {
       <div className="flex items-center gap-3">
         <div className="w-2 h-2 rounded-full bg-[#00d4aa] status-live" />
         <span className="text-xs font-mono tracking-[0.2em] text-[#00d4aa] uppercase">
-          Franklin Street Panopticon
+          Franklin Street Data
         </span>
       </div>
 

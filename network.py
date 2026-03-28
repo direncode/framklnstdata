@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Street Network Analysis Engine
 ==============================================
 Analyzes the Franklin Street pedestrian network using

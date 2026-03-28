@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Palantir-Grade Intelligence Dashboard
 ==============================================
 
@@ -23,7 +23,7 @@ from datetime import datetime
 import streamlit as st
 
 st.set_page_config(
-    page_title="Franklin Street Panopticon v3",
+    page_title="Franklin Street Data",
     page_icon="📡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -110,7 +110,7 @@ from livefeed import build_live_feed
 st.markdown("""
 <div style='text-align: center; padding: 10px 0;'>
     <h1 style='color: #00ff88; margin-bottom: 0;'>
-        📡 FRANKLIN STREET PANOPTICON v3
+        📡 FRANKLIN STREET DATA
     </h1>
     <p style='color: #4a9eff; font-size: 14px; letter-spacing: 3px;'>
         SURVEILLANCE-GRADE INTELLIGENCE PLATFORM
@@ -992,7 +992,7 @@ with tab_trends:
 with tab_report:
     st.subheader("📄 Full Surveillance Report")
 
-    from panopticon import generate_report
+    from main import generate_report
 
     report = generate_report(
         time_of_day=time_of_day,
@@ -1006,6 +1006,6 @@ with tab_report:
     st.download_button(
         label="📥 Download Report",
         data=report,
-        file_name=f"panopticon_v3_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+        file_name=f"franklinst_data_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
         mime="text/plain",
     )

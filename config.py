@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3 - Configuration
+  FRANKLIN STREET DATA - Configuration
 ==============================================
 Centralized constants, API keys, and cache settings.
 """
@@ -56,7 +56,7 @@ CHAPEL_HILL_GIS_BASE = (
 # Cache Configuration
 # ---------------------------------------------------------------------------
 
-CACHE_DIR = ".panopticon_cache"
+CACHE_DIR = ".franklinst_cache"
 
 # Cache time-to-live in hours
 CACHE_TTL = {

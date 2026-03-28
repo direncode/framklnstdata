@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v3
+  FRANKLIN STREET DATA
   Venue Discovery & Ranking
 ==============================================
 Every venue on Franklin Street, discovered live from OpenStreetMap.

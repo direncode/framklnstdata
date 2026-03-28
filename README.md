@@ -1,116 +1,84 @@
-# Franklin Street Panopticon v3
+# Franklin Street Data
 
-Surveillance-grade intelligence platform for trivia night optimization at Bandidos on Franklin Street, UNC Chapel Hill.
+Live foot traffic intelligence for Franklin Street, UNC Chapel Hill.
 
-## Architecture
+## How It Works
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    PANOPTICON v3                              │
-├──────────┬──────────┬──────────┬──────────┬─────────────────┤
-│ traffic  │ trends   │ intel    │ network  │ satellite       │
-│  .py     │  .py     │  .py     │  .py     │  .py            │
-│          │          │          │          │                 │
-│ OSM      │ Google   │ Census   │ Street   │ Esri Imagery    │
-│ Popular  │ Trends   │ Weather  │ Network  │ Tile Layers     │
-│ Times    │ Rising   │ Events   │ Central- │ View Presets    │
-│ GIS      │ Queries  │ Social   │ ity      │                 │
-│ NCDOT    │ Realtime │ Signals  │ Walk     │                 │
-│ Heatmap  │          │          │ Score    │                 │
-├──────────┴──────────┴──────────┴──────────┴─────────────────┤
-│                       spots.py                               │
-│              (Hybrid static + live scoring)                   │
-├──────────────────────────────────────────────────────────────┤
-│                       config.py                              │
-├──────────┬──────────────────────┬────────────────────────────┤
-│ CLI      │ Streamlit Dashboard  │ REST API                   │
-│ panop-   │ app.py               │ datastream.py              │
-│ ticon.py │ (Palantir-grade UI)  │ (JSON endpoints)           │
-└──────────┴──────────────────────┴────────────────────────────┘
-```
+1. **OpenStreetMap Overpass API** discovers every bar, restaurant, cafe, nightclub on Franklin Street
+2. **Google Places API** fetches hourly busyness (0-100%) for each venue — the only ranking signal
+3. Busyness values become heat map weights, interpolated along the street into a convergent corridor
+4. **Live feeds** (Reddit, DTH, UNC Calendar, Google Trends) extract keywords for trivia topic suggestions
 
 ## Quick Start
 
 ```bash
+# Backend (Python)
 pip install -r requirements.txt
-
-# 1. CLI Report (works immediately, no API keys needed)
-python panopticon.py --no-live
-
-# 2. Streamlit Dashboard (satellite map, heat map, intelligence tabs)
-streamlit run app.py
-
-# 3. REST API (JSON data endpoints for integration)
 python datastream.py
+
+# Frontend (Next.js)
+cd web && npm install && npm run dev
 ```
 
-## Three Interfaces
+## Deploy
 
-### CLI (`panopticon.py`)
+**Backend** → Fly.io:
 ```bash
-python panopticon.py                    # Full report with live data
-python panopticon.py --hour 21          # Simulate 9pm busyness
-python panopticon.py --no-live          # Static data only
-python panopticon.py --save report.txt  # Save to file
+fly launch --copy-config
+fly secrets set GOOGLE_PLACES_API_KEY=your-key
+fly deploy
 ```
 
-### Dashboard (`app.py`)
-```bash
-streamlit run app.py
-```
-7 tabs: Satellite, Heat Map, Traffic, Network, Intel, Trends, Report
+**Frontend** → Vercel:
+- Set Root Directory to `web` in Vercel dashboard
+- Set `BACKEND_URL` env var to your Fly.io URL
 
-### Data API (`datastream.py`)
-```bash
-python datastream.py --port 8765
+## API Endpoints
+
 ```
-Endpoints:
-- `GET /spots` — Ranked venues with live busyness
-- `GET /traffic?hour=21&day=friday` — Traffic at specific time
-- `GET /heatmap?hour=21` — GeoJSON heat map data
-- `GET /venues` — OSM venue discovery
-- `GET /trends?live=true` — Trending search intelligence
-- `GET /intel` — Full OSINT briefing (demographics, weather, events)
-- `GET /network` — Street network topology
-- `GET /export` — Complete data export
+GET /status          System health
+GET /venues          All discovered venues + busyness
+GET /heatmap         Heat map data points
+GET /livefeed        Reddit + DTH + UNC Calendar + Trends
+GET /trends          Google Trends + trivia suggestions
+GET /intel           Census + weather + UNC events
+GET /network         Street network topology
+GET /report          Full text report
+GET /export          Complete data dump
+```
 
 ## Data Sources
 
-| Source | Data | Cost |
+| Source | Data | Key Needed |
 |---|---|---|
-| OpenStreetMap Overpass API | Venue discovery, street network | Free |
-| Esri World Imagery | Satellite/aerial tiles | Free |
-| Google Places Popular Times | Hourly busyness | Free w/ key |
-| NCDOT AADT | Vehicle traffic counts | Free (public record) |
-| US Census Bureau | Demographics, population | Free |
-| OpenWeatherMap | Weather conditions | Free tier |
-| Google Trends (pytrends) | Search interest, rising queries | Free |
-| Chapel Hill ArcGIS | GIS layers, pedestrian infra | Free |
-
-## Optional API Keys
-
-```bash
-# For real popular times data (vs curated fallback)
-export GOOGLE_PLACES_API_KEY="your-key"
-
-# For live weather data (vs fallback estimate)
-export OPENWEATHER_API_KEY="your-key"
-
-# For live Census data (vs pre-computed)
-export CENSUS_API_KEY="your-key"
-```
+| OpenStreetMap Overpass | Venue discovery | No |
+| Reddit JSON API | r/UNC, r/chapelhill posts | No |
+| Daily Tar Heel RSS | Campus news | No |
+| UNC Calendar Localist | Campus events | No |
+| Google Trends (pytrends) | Search interest | No |
+| Chapel Hill ArcGIS | Crime data, GIS layers | No |
+| NCDOT ArcGIS | Vehicle traffic counts | No |
+| NC ABC Commission | Liquor licenses | No |
+| Google Places API | Hourly busyness | Yes (free tier) |
+| OpenWeatherMap | Weather | Yes (free tier) |
+| US Census Bureau | Demographics | Yes (free) |
 
 ## Files
 
-| File | Lines | Purpose |
-|---|---|---|
-| `config.py` | Config | Constants, API keys, cache TTLs, geography |
-| `spots.py` | Data | 10 curated locations + hybrid scoring |
-| `traffic.py` | Engine | OSM, popular times, GIS, heat map builder |
-| `trends.py` | Engine | Google Trends, rising queries, realtime |
-| `intel.py` | Engine | Census, weather, events, social signals |
-| `network.py` | Engine | Street network, centrality, walk scores |
-| `satellite.py` | Engine | Tile sources, imagery layers, view presets |
-| `panopticon.py` | CLI | Report generator with ASCII visualizations |
-| `app.py` | UI | Streamlit Palantir-grade dashboard |
-| `datastream.py` | API | REST JSON endpoints for data consumption |
+| File | Purpose |
+|---|---|
+| `config.py` | Constants, API keys, geography |
+| `spots.py` | OSM venue discovery + busyness ranking |
+| `traffic.py` | Google Places busyness, heat map builder |
+| `trends.py` | Google Trends, rising queries |
+| `intel.py` | Census, weather, UNC events |
+| `osint.py` | Reddit, transit, crime, ABC licenses |
+| `livefeed.py` | Live keyword feed aggregator |
+| `forecast.py` | Live signal forecasting |
+| `network.py` | Street network analysis |
+| `spatial.py` | Isochrones, gravity model, placement |
+| `buildings.py` | 3D building footprints, viewshed |
+| `satellite.py` | Map tile sources |
+| `main.py` | CLI report generator |
+| `datastream.py` | REST API server |
+| `web/` | Next.js frontend (Vercel) |
