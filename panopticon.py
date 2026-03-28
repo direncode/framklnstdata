@@ -322,7 +322,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print()
-    print("  ███ Starting Franklin Street Panopticon v2...")
+    print("  ███ Starting Franklin Street Panopticon v3...")
     print()
 
     report = generate_report(

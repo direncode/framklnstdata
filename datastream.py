@@ -62,6 +62,17 @@ from intel import (
     get_event_context,
     get_social_signals,
 )
+from spatial import build_spatial_analysis
+from buildings import fetch_building_footprints, compute_viewshed_for_spots
+from osint import (
+    build_deep_osint_report,
+    get_venue_intelligence,
+    get_sentiment_rankings,
+    get_crime_data,
+    get_transit_data,
+    estimate_pedestrian_flow,
+)
+from forecast import build_forecast_report, forecast_traffic, simulate_event_impact
 from network import (
     fetch_street_network,
     find_intersections,
@@ -415,6 +426,77 @@ def handle_report(params):
     }
 
 
+def handle_spatial(params):
+    """Advanced spatial analytics."""
+    hour = _parse_hour(params.get("hour", [None])[0])
+    spots = get_enriched_spots(hour=hour, top_n=10)
+    return build_spatial_analysis(spots, hour=hour)
+
+
+def handle_buildings():
+    """3D building footprints."""
+    buildings = fetch_building_footprints()
+    return {
+        "building_count": len(buildings),
+        "buildings": buildings,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_viewshed(params):
+    """Viewshed analysis for spots."""
+    spots = get_enriched_spots(top_n=10)
+    return {
+        "viewshed": compute_viewshed_for_spots(spots),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_osint():
+    """Deep OSINT intelligence."""
+    return build_deep_osint_report()
+
+
+def handle_sentiment():
+    """Venue sentiment rankings."""
+    return {
+        "rankings": get_sentiment_rankings(),
+        "venue_details": get_venue_intelligence(),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_crime():
+    """Crime data intelligence."""
+    return get_crime_data()
+
+
+def handle_transit():
+    """Transit route intelligence."""
+    return get_transit_data()
+
+
+def handle_pedestrians(params):
+    """Pedestrian flow estimate."""
+    hour = _parse_hour(params.get("hour", [None])[0])
+    day = _parse_day(params.get("day", [None])[0])
+    return estimate_pedestrian_flow(hour=hour, day_of_week=day)
+
+
+def handle_forecast(params):
+    """Traffic forecast."""
+    hours = int(params.get("hours", ["24"])[0])
+    return build_forecast_report(hours_ahead=hours)
+
+
+def handle_simulate(params):
+    """Event impact simulation."""
+    event_type = params.get("event", ["basketball_win"])[0]
+    hour = _parse_hour(params.get("hour", ["19"])[0])
+    day = _parse_day(params.get("day", [None])[0])
+    return simulate_event_impact(event_type, event_hour=hour, day_of_week=day)
+
+
 def handle_export(params):
     """Complete data export — all feeds combined."""
     hour = _parse_hour(params.get("hour", [None])[0])
@@ -429,6 +511,9 @@ def handle_export(params):
         "intel": handle_intel(),
         "network": handle_network(),
         "trends": handle_trends(params),
+        "spatial": handle_spatial(params),
+        "osint": handle_osint(),
+        "forecast": handle_forecast(params),
     }
 
 
@@ -458,6 +543,16 @@ class PanopticonHandler(BaseHTTPRequestHandler):
             "/intel/events": handle_events,
             "/network": handle_network,
             "/network/intersections": handle_intersections,
+            "/spatial": lambda: handle_spatial(params),
+            "/buildings": handle_buildings,
+            "/viewshed": lambda: handle_viewshed(params),
+            "/osint": handle_osint,
+            "/osint/sentiment": handle_sentiment,
+            "/osint/crime": handle_crime,
+            "/osint/transit": handle_transit,
+            "/osint/pedestrians": lambda: handle_pedestrians(params),
+            "/forecast": lambda: handle_forecast(params),
+            "/forecast/simulate": lambda: handle_simulate(params),
             "/report": lambda: handle_report(params),
             "/export": lambda: handle_export(params),
         }

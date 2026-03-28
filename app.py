@@ -75,6 +75,40 @@ from network import (
     compute_walk_scores,
     get_network_lines,
 )
+from spatial import (
+    build_spatial_analysis,
+    compute_isochrones_for_spots,
+    compute_kde,
+    kde_to_heatmap_points,
+    dbscan_cluster,
+    compute_voronoi,
+    compute_hexbins,
+    gravity_model,
+    pareto_frontier,
+    optimize_placement,
+)
+from buildings import (
+    fetch_building_footprints,
+    compute_viewshed_for_spots,
+)
+from osint import (
+    get_venue_intelligence,
+    get_sentiment_rankings,
+    get_crime_data,
+    get_transit_data,
+    get_transit_stops,
+    get_abc_licenses,
+    get_competing_events,
+    estimate_pedestrian_flow,
+    build_deep_osint_report,
+)
+from forecast import (
+    forecast_traffic,
+    forecast_best_flyering_windows,
+    decompose_seasonal,
+    simulate_event_impact,
+    EVENT_ANOMALIES,
+)
 
 # ---------------------------------------------------------------------------
 # Header
@@ -199,9 +233,10 @@ spots = load_spots(time_of_day, selected_hour, num_spots)
 # Tab Layout
 # ---------------------------------------------------------------------------
 
-tab_sat, tab_heat, tab_traffic, tab_network, tab_intel, tab_trends, tab_report = st.tabs([
-    "🛰️ SATELLITE", "🔥 HEAT MAP", "📊 TRAFFIC",
-    "🕸️ NETWORK", "🕵️ INTEL", "📈 TRENDS", "📄 REPORT",
+tab_sat, tab_heat, tab_traffic, tab_network, tab_spatial, tab_intel, tab_osint, tab_forecast, tab_trends, tab_report = st.tabs([
+    "🛰️ SATELLITE", "🔥 HEAT MAP", "📊 TRAFFIC", "🕸️ NETWORK",
+    "🔬 SPATIAL", "🕵️ INTEL", "🔍 DEEP OSINT", "📉 FORECAST",
+    "📈 TRENDS", "📄 REPORT",
 ])
 
 # ═══════════════════════════════════════════════════════════════
@@ -616,7 +651,120 @@ with tab_network:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 5: OSINT INTELLIGENCE
+# TAB 5: SPATIAL ANALYTICS
+# ═══════════════════════════════════════════════════════════════
+with tab_spatial:
+    st.subheader("🔬 Advanced Spatial Analytics")
+
+    import pandas as pd
+
+    # Run spatial analysis
+    spatial = build_spatial_analysis(spots, hour=selected_hour)
+
+    # Pareto Frontier
+    st.markdown("### Pareto-Optimal Spots")
+    st.caption("Spots that can't be beaten on ALL metrics simultaneously")
+    pareto = spatial["pareto_frontier"]
+    for p in pareto:
+        status = "⭐ PARETO OPTIMAL" if p["is_pareto"] else "  dominated"
+        scores_str = " | ".join(f"{k}: {v}" for k, v in p["scores"].items())
+        st.markdown(f"**{p['spot_name']}** — {status} — {scores_str}")
+
+    st.markdown("---")
+
+    # Optimal Placement
+    st.markdown("### Optimal QR Code Placement (5 spots, max coverage)")
+    optimal = spatial["optimal_placement"]
+    for o in optimal:
+        st.markdown(
+            f"**#{o['rank']}** — {o['spot_name']} "
+            f"(score: {o['composite_score']})"
+        )
+
+    st.markdown("---")
+
+    # Clusters
+    st.markdown("### DBSCAN Activity Clusters")
+    clusters = spatial["clusters"]
+    if clusters:
+        for c in clusters:
+            st.markdown(
+                f"**Cluster {c['cluster_id']}** — "
+                f"{c['member_count']} venues, "
+                f"total weight: {c['total_weight']}, "
+                f"center: ({c['center'][0]:.4f}, {c['center'][1]:.4f})"
+            )
+    else:
+        st.info("No significant clusters detected at current parameters")
+
+    # Voronoi
+    st.markdown("### Voronoi Influence Zones")
+    st.caption("Which venue 'owns' the most territory")
+    voronoi = spatial["voronoi_cells"]
+    voronoi_data = pd.DataFrame([
+        {"Venue": v["spot_name"][:25], "Coverage %": v["coverage_area_pct"]}
+        for v in voronoi
+    ])
+    st.bar_chart(voronoi_data, x="Venue", y="Coverage %")
+
+    # Isochrones
+    st.markdown("### Walk-Time Isochrones (Top 3 Spots)")
+    try:
+        import folium
+        from streamlit_folium import st_folium
+
+        m_iso = folium.Map(
+            location=list(FRANKLIN_STREET_CENTER),
+            zoom_start=16, tiles="CartoDB dark_matter",
+        )
+        iso_data = spatial["isochrones"]
+        iso_colors = {"3": "#ff000066", "5": "#ff660066"}
+        for spot_iso in iso_data:
+            for ring in spot_iso["isochrones"]:
+                folium.Polygon(
+                    locations=ring["polygon"],
+                    color=ring["color"],
+                    fill=True,
+                    fill_color=ring["color"],
+                    fill_opacity=0.15,
+                    tooltip=f"{spot_iso['spot_name']} — {ring['minutes']} min walk",
+                ).add_to(m_iso)
+            folium.Marker(
+                location=[spot_iso["lat"], spot_iso["lon"]],
+                tooltip=spot_iso["spot_name"],
+                icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+            ).add_to(m_iso)
+        st_folium(m_iso, width=900, height=400, key="isochrone_map")
+    except ImportError:
+        st.info("Install folium for isochrone visualization")
+
+    # Viewshed
+    st.markdown("### Viewshed Analysis (Line-of-Sight Visibility)")
+    try:
+        viewshed = compute_viewshed_for_spots(spots)
+        for vs in viewshed:
+            bar = "█" * (vs["visibility_pct"] // 5) + "░" * (20 - vs["visibility_pct"] // 5)
+            st.markdown(
+                f"**{vs['spot_name'][:30]}** — "
+                f"{vs['visibility_pct']}% visible `{bar}`"
+            )
+    except Exception:
+        st.info("Viewshed data unavailable")
+
+    # Gravity Model
+    st.markdown("### Gravity Model — Where Do People Go?")
+    st.caption("Probability of visiting each venue from campus center")
+    campus_lat, campus_lon = 35.9117, -79.0510
+    gravity = gravity_model(spots, campus_lat, campus_lon)
+    gravity_df = pd.DataFrame([
+        {"Venue": g["spot_name"][:25], "Probability %": g["probability_pct"]}
+        for g in gravity[:8]
+    ])
+    st.bar_chart(gravity_df, x="Venue", y="Probability %")
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 6: OSINT INTELLIGENCE
 # ═══════════════════════════════════════════════════════════════
 with tab_intel:
     st.subheader("🕵️ OSINT Intelligence Briefing")
@@ -700,7 +848,175 @@ with tab_intel:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 6: TRIVIA TRENDS
+# TAB 7: DEEP OSINT
+# ═══════════════════════════════════════════════════════════════
+with tab_osint:
+    st.subheader("🔍 Deep OSINT Intelligence")
+
+    import pandas as pd
+
+    # Venue Sentiment Analysis
+    st.markdown("### 📝 Venue Sentiment Analysis")
+    rankings = get_sentiment_rankings()
+    for r in rankings:
+        trend_icon = "📈" if r["trend"] == "slight_decline" else "➡️"
+        st.markdown(
+            f"**{r['venue']}** — ⭐ {r['rating']} ({r['review_count']} reviews) "
+            f"| Sentiment: **{r['sentiment_score']:.0%}** {trend_icon}"
+        )
+        st.caption(f"✅ \"{r['top_positive']}\" | ❌ \"{r['top_negative']}\"")
+
+    st.markdown("---")
+
+    # Crime Intelligence
+    st.markdown("### 🚨 Crime Intelligence")
+    crime = get_crime_data()
+    st.markdown(f"*{crime['summary']['reporting_period']} — {crime['summary']['total_incidents_franklin_st']} total incidents*")
+
+    for hotspot in crime["hotspots"]:
+        st.markdown(
+            f"**{hotspot['location']}** — {hotspot['incident_count']} incidents | "
+            f"Types: {', '.join(hotspot['primary_types'][:2])}"
+        )
+        st.caption(f"⚠️ {hotspot['safety_note']}")
+
+    # Crime by day of week
+    dow_data = pd.DataFrame(
+        {"Day": list(crime["day_of_week"].keys()),
+         "Incidents": list(crime["day_of_week"].values())}
+    )
+    st.bar_chart(dow_data, x="Day", y="Incidents")
+
+    st.markdown("---")
+
+    # Transit Intelligence
+    st.markdown("### 🚌 Transit Intelligence")
+    transit = get_transit_data()
+    st.metric("Daily Ridership Near Franklin St",
+              f"{transit['total_daily_ridership_near_franklin']:,}")
+    for route in transit["routes"]:
+        st.markdown(
+            f"**Route {route['route']}** ({route['name']}) — "
+            f"Every {route['frequency_min']} min | "
+            f"{route['ridership_daily']:,} riders/day"
+        )
+
+    st.markdown("---")
+
+    # ABC Licenses
+    st.markdown("### 🍺 ABC License Intelligence")
+    licenses = get_abc_licenses()
+    for lic in licenses:
+        st.markdown(
+            f"**{lic['name']}** — {lic['permit_type']} | "
+            f"Capacity: ~{lic['capacity_est']} | Status: {lic['status']}"
+        )
+
+    st.markdown("---")
+
+    # Competing Events
+    st.markdown("### 🎯 Competition Analysis")
+    comp = get_competing_events(selected_day)
+    st.markdown(f"**Competition level for {selected_day}:** {comp['competition_level']}")
+    st.info(comp["recommendation"])
+    for ev in comp["competing_events"]:
+        st.markdown(f"• {ev['name']} at {ev['venue']} — {ev['time']} (~{ev['estimated_attendance']} ppl)")
+
+    st.markdown("---")
+
+    # Pedestrian Flow Estimate
+    st.markdown("### 🚶 Pedestrian Flow Estimate")
+    ped = estimate_pedestrian_flow(hour=selected_hour, day_of_week=selected_dow)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Est. Pedestrians/Hour", f"{ped['estimated_pedestrians_per_hour']:,}")
+    c2.metric("Base Traffic", f"{ped['base_foot_traffic']:,}")
+    c3.metric("Transit Contribution", f"{ped['transit_contribution']:,}")
+
+    ped_df = pd.DataFrame({
+        "Hour": list(range(24)),
+        "Pedestrians": ped["full_day_profile"],
+    })
+    st.area_chart(ped_df, x="Hour", y="Pedestrians", height=250)
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 8: FORECAST
+# ═══════════════════════════════════════════════════════════════
+with tab_forecast:
+    st.subheader("📉 Predictive Traffic Forecasting")
+
+    import pandas as pd
+
+    # 24-hour forecast
+    st.markdown("### 24-Hour Traffic Forecast")
+    forecasts = forecast_traffic(hours_ahead=24)
+    forecast_df = pd.DataFrame({
+        "Hours From Now": [f["hours_from_now"] for f in forecasts],
+        "Predicted": [f["predicted_traffic"] for f in forecasts],
+        "Lower Bound": [f["lower_bound"] for f in forecasts],
+        "Upper Bound": [f["upper_bound"] for f in forecasts],
+    })
+    st.line_chart(forecast_df, x="Hours From Now",
+                  y=["Predicted", "Lower Bound", "Upper Bound"],
+                  height=300)
+
+    st.markdown("---")
+
+    # Best flyering windows
+    st.markdown("### 🎯 Best Flyering Windows Today")
+    windows = forecast_best_flyering_windows(
+        day_of_week=selected_dow,
+        month=datetime.now().month,
+    )
+    for w in windows:
+        st.markdown(f"**{w['hour_label']}** ({w['period']}) — ~{w['predicted_traffic']} ped/hr")
+        st.caption(w["recommendation"])
+
+    st.markdown("---")
+
+    # Seasonal decomposition
+    st.markdown("### 📊 Seasonal Decomposition")
+    decomp = decompose_seasonal(day_of_week=selected_dow)
+    decomp_df = pd.DataFrame({
+        "Hour": list(range(24)),
+        "Observed": decomp["observed"],
+        "Trend": decomp["trend"],
+        "Seasonal": decomp["seasonal"],
+    })
+    st.line_chart(decomp_df, x="Hour",
+                  y=["Observed", "Trend", "Seasonal"],
+                  height=300)
+    c1, c2 = st.columns(2)
+    c1.metric("Peak Hour", f"{decomp['peak_hour']}:00")
+    c2.metric("Trough Hour", f"{decomp['trough_hour']}:00")
+
+    st.markdown("---")
+
+    # Event simulation
+    st.markdown("### ⚡ Event Impact Simulator")
+    event_type = st.selectbox(
+        "Simulate event", list(EVENT_ANOMALIES.keys()),
+    )
+    event_hour = st.slider("Event start hour", 0, 23, 19)
+
+    sim = simulate_event_impact(event_type, event_hour, selected_dow)
+    if "error" not in sim:
+        sim_df = pd.DataFrame({
+            "Hour": list(range(24)),
+            "Baseline": sim["baseline"],
+            "With Event": sim["modified"],
+        })
+        st.line_chart(sim_df, x="Hour",
+                      y=["Baseline", "With Event"],
+                      height=300)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Multiplier", f"{sim['multiplier']}x")
+        c2.metric("Peak (With Event)", f"{sim['peak_modified']:,}")
+        c3.metric("Additional Pedestrians", f"+{sim['total_additional_pedestrians']:,}")
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 9: TRIVIA TRENDS
 # ═══════════════════════════════════════════════════════════════
 with tab_trends:
     st.subheader("📈 Search Intelligence — Trivia Topic Engine")
