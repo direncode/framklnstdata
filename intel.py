@@ -1,11 +1,15 @@
 """
 ==============================================
   FRANKLIN STREET PANOPTICON v3
-  OSINT Intelligence Aggregator
+  Live Intelligence Module
 ==============================================
-Multi-source open intelligence: Census demographics,
-weather conditions, UNC event calendar, and social
-signal estimation for Chapel Hill / Franklin Street.
+All data is API-fetched or not included.
+No hardcoded fake data.
+
+Sources:
+  - US Census Bureau API (free key)
+  - OpenWeatherMap API (free tier)
+  - UNC Events Calendar (RSS/scrape)
 """
 
 import json
@@ -17,7 +21,7 @@ import requests
 from config import CACHE_DIR, FRANKLIN_STREET_CENTER
 
 # ---------------------------------------------------------------------------
-# Cache (shared with traffic.py)
+# Cache
 # ---------------------------------------------------------------------------
 
 def _cache_path():
@@ -26,181 +30,122 @@ def _cache_path():
     return path
 
 
-def _read_cache(key):
+def _read_cache(key, max_age_hours=6):
+    fp = os.path.join(_cache_path(), f"{key}.json")
+    if not os.path.exists(fp):
+        return None
+    mtime = datetime.fromtimestamp(os.path.getmtime(fp))
+    if (datetime.now() - mtime) > timedelta(hours=max_age_hours):
+        return None
     try:
-        fp = os.path.join(_cache_path(), f"{key}.json")
         with open(fp) as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (json.JSONDecodeError, IOError):
         return None
 
 
 def _write_cache(key, data):
     fp = os.path.join(_cache_path(), f"{key}.json")
     with open(fp, "w") as f:
-        json.dump(data, f, indent=2)
-
-
-def _cache_age_hours(key):
-    fp = os.path.join(_cache_path(), f"{key}.json")
-    if not os.path.exists(fp):
-        return float("inf")
-    mtime = datetime.fromtimestamp(os.path.getmtime(fp))
-    return (datetime.now() - mtime).total_seconds() / 3600
+        json.dump(data, f, indent=2, default=str)
 
 
 # ---------------------------------------------------------------------------
-# Census Demographics (US Census Bureau API)
+# US Census Bureau API (Live)
 # ---------------------------------------------------------------------------
 
-# Pre-computed Chapel Hill / Orange County demographics
-# Source: US Census Bureau ACS 5-year estimates
-# FIPS: North Carolina = 37, Orange County = 135
-CHAPEL_HILL_DEMOGRAPHICS = {
-    "total_population": 61960,
-    "median_age": 25.8,
-    "college_enrollment": 30011,
-    "pct_18_24": 42.3,
-    "pct_25_34": 14.7,
-    "median_household_income": 57842,
-    "pct_bachelors_or_higher": 72.1,
-    "housing_units": 25841,
-    "pct_renter_occupied": 58.3,
-    "population_density_per_sq_mi": 2834,
-    "source": "US Census Bureau ACS 2022 5-Year Estimates",
-    "fips_state": "37",
-    "fips_county": "135",
-}
-
-# Demographic insights relevant to trivia night marketing
-DEMOGRAPHIC_INSIGHTS = [
-    {
-        "metric": "College-age population (18-24)",
-        "value": "42.3%",
-        "insight": (
-            "Chapel Hill's population is 42% college-age — your primary "
-            "trivia audience. Marketing should be campus-centric."
-        ),
-    },
-    {
-        "metric": "Renter-occupied housing",
-        "value": "58.3%",
-        "insight": (
-            "Majority renters = high turnover = need constant re-marketing. "
-            "New students every semester need to discover trivia night."
-        ),
-    },
-    {
-        "metric": "Median age",
-        "value": "25.8 years",
-        "insight": (
-            "Very young median age driven by student population. "
-            "Pop culture, memes, and social media topics will land best."
-        ),
-    },
-    {
-        "metric": "Education level",
-        "value": "72.1% Bachelor's+",
-        "insight": (
-            "Highly educated population — don't dumb down the trivia. "
-            "Academic and science questions will be appreciated."
-        ),
-    },
-]
-
-
-def get_demographics():
-    """Return Chapel Hill demographic data and insights."""
-    return {
-        "data": CHAPEL_HILL_DEMOGRAPHICS,
-        "insights": DEMOGRAPHIC_INSIGHTS,
-    }
-
-
-def fetch_live_census(api_key=None):
+def fetch_demographics():
     """
-    Fetch live Census data for Orange County, NC.
-    Requires a Census API key (free at api.census.gov/data/key_signup.html).
-    Falls back to static data if unavailable.
+    Fetch demographics for Orange County, NC (Chapel Hill) from US Census API.
+    Requires CENSUS_API_KEY env var (free at api.census.gov/data/key_signup.html).
+    Returns None if no key or API fails.
     """
-    if not api_key:
-        api_key = os.environ.get("CENSUS_API_KEY")
+    api_key = os.environ.get("CENSUS_API_KEY")
     if not api_key:
         return None
 
-    cache_key = "census_live"
-    if _cache_age_hours(cache_key) < 720:  # Cache for 30 days
-        cached = _read_cache(cache_key)
-        if cached:
-            return cached
+    cached = _read_cache("census_demographics", max_age_hours=720)
+    if cached:
+        return cached
+
+    # ACS 5-Year Estimates for Orange County, NC (FIPS 37-135)
+    variables = [
+        "B01003_001E",  # Total population
+        "B01002_001E",  # Median age
+        "B14001_002E",  # School enrollment
+        "B25001_001E",  # Housing units
+        "B19013_001E",  # Median household income
+        "B15003_022E",  # Bachelor's degree
+        "B25003_003E",  # Renter-occupied units
+        "B01001_007E",  # Male 18-19
+        "B01001_008E",  # Male 20
+        "B01001_009E",  # Male 21
+        "B01001_010E",  # Male 22-24
+        "B01001_031E",  # Female 18-19
+        "B01001_032E",  # Female 20
+        "B01001_033E",  # Female 21
+        "B01001_034E",  # Female 22-24
+    ]
 
     url = (
-        "https://api.census.gov/data/2022/acs/acs5"
-        "?get=B01003_001E,B01002_001E,B14001_002E,"
-        "B25001_001E,B19013_001E"
-        "&for=county:135&in=state:37"
+        f"https://api.census.gov/data/2022/acs/acs5"
+        f"?get={','.join(variables)}"
+        f"&for=county:135&in=state:37"
         f"&key={api_key}"
     )
 
     try:
         resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            if len(data) > 1:
-                values = data[1]
-                result = {
-                    "total_population": int(values[0]),
-                    "median_age": float(values[1]),
-                    "college_enrollment": int(values[2]),
-                    "housing_units": int(values[3]),
-                    "median_household_income": int(values[4]),
-                    "source": "US Census Bureau ACS 2022 (Live API)",
-                }
-                _write_cache(cache_key, result)
-                return result
+        resp.raise_for_status()
+        data = resp.json()
+        if len(data) < 2:
+            return None
+
+        v = data[1]
+        total_pop = int(v[0]) if v[0] else 0
+        # Sum 18-24 age groups (male + female)
+        age_18_24 = sum(int(v[i]) if v[i] else 0 for i in range(7, 15))
+        pct_18_24 = round(age_18_24 / total_pop * 100, 1) if total_pop else 0
+
+        result = {
+            "total_population": total_pop,
+            "median_age": float(v[1]) if v[1] else None,
+            "school_enrollment": int(v[2]) if v[2] else None,
+            "housing_units": int(v[3]) if v[3] else None,
+            "median_household_income": int(v[4]) if v[4] else None,
+            "bachelors_degree_holders": int(v[5]) if v[5] else None,
+            "renter_occupied_units": int(v[6]) if v[6] else None,
+            "pct_18_24": pct_18_24,
+            "age_18_24_count": age_18_24,
+            "source": "US Census Bureau ACS 2022 5-Year (live API)",
+            "fetched_at": datetime.now().isoformat(),
+        }
+        _write_cache("census_demographics", result)
+        print(f"  [+] Census: population {total_pop:,}, median age {result['median_age']}")
+        return result
+
     except Exception as e:
         print(f"  [!] Census API error: {e}")
-
-    return None
+        return None
 
 
 # ---------------------------------------------------------------------------
-# Weather Intelligence (OpenWeatherMap)
+# OpenWeatherMap API (Live)
 # ---------------------------------------------------------------------------
-
-# Fallback weather for Chapel Hill (typical conditions)
-FALLBACK_WEATHER = {
-    "temp_f": 72,
-    "feels_like_f": 73,
-    "description": "partly cloudy",
-    "humidity": 55,
-    "wind_mph": 8,
-    "is_good_flyering_weather": True,
-    "weather_impact": (
-        "Good conditions for outdoor flyering. "
-        "Moderate temperature and low wind."
-    ),
-    "source": "fallback estimate",
-}
-
 
 def fetch_weather():
     """
     Fetch current weather for Chapel Hill from OpenWeatherMap.
-    Requires OPENWEATHER_API_KEY env var (free tier: 1000 calls/day).
-    Falls back to static data.
+    Requires OPENWEATHER_API_KEY env var (free: 1000 calls/day).
+    Returns None if no key or API fails.
     """
     api_key = os.environ.get("OPENWEATHER_API_KEY")
-
-    # Check cache first (weather cached for 30 min)
-    cache_key = "weather_current"
-    if _cache_age_hours(cache_key) < 0.5:
-        cached = _read_cache(cache_key)
-        if cached:
-            return cached
-
     if not api_key:
-        return FALLBACK_WEATHER
+        return None
+
+    cached = _read_cache("weather_current", max_age_hours=0.5)
+    if cached:
+        return cached
 
     lat, lon = FRANKLIN_STREET_CENTER
     url = (
@@ -210,188 +155,88 @@ def fetch_weather():
 
     try:
         resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            temp = data["main"]["temp"]
-            feels_like = data["main"]["feels_like"]
-            humidity = data["main"]["humidity"]
-            wind = data["wind"]["speed"]
-            desc = data["weather"][0]["description"]
+        resp.raise_for_status()
+        data = resp.json()
 
-            # Determine if weather is good for flyering
-            is_good = (
-                temp > 40 and temp < 95
-                and wind < 20
-                and "rain" not in desc.lower()
-                and "storm" not in desc.lower()
-                and "snow" not in desc.lower()
-            )
+        temp = data["main"]["temp"]
+        feels_like = data["main"]["feels_like"]
+        humidity = data["main"]["humidity"]
+        wind = data["wind"]["speed"]
+        desc = data["weather"][0]["description"]
 
-            if not is_good:
-                impact = _weather_impact(temp, wind, desc)
-            else:
-                impact = (
-                    "Good conditions for outdoor flyering. "
-                    f"{desc.title()}, {temp:.0f}°F."
-                )
+        is_good = (
+            temp > 40 and temp < 95
+            and wind < 20
+            and "rain" not in desc.lower()
+            and "storm" not in desc.lower()
+            and "snow" not in desc.lower()
+        )
 
-            result = {
-                "temp_f": round(temp),
-                "feels_like_f": round(feels_like),
-                "description": desc,
-                "humidity": humidity,
-                "wind_mph": round(wind),
-                "is_good_flyering_weather": is_good,
-                "weather_impact": impact,
-                "source": "OpenWeatherMap (live)",
-            }
-            _write_cache(cache_key, result)
-            return result
+        result = {
+            "temp_f": round(temp),
+            "feels_like_f": round(feels_like),
+            "description": desc,
+            "humidity": humidity,
+            "wind_mph": round(wind),
+            "is_good_flyering_weather": is_good,
+            "source": "OpenWeatherMap (live)",
+            "fetched_at": datetime.now().isoformat(),
+        }
+        _write_cache("weather_current", result)
+        print(f"  [+] Weather: {temp:.0f}°F, {desc}")
+        return result
+
     except Exception as e:
         print(f"  [!] Weather API error: {e}")
-
-    return FALLBACK_WEATHER
-
-
-def _weather_impact(temp, wind, desc):
-    """Generate weather impact assessment for flyering."""
-    issues = []
-    if temp < 40:
-        issues.append("cold temperatures reduce foot traffic")
-    if temp > 95:
-        issues.append("extreme heat reduces foot traffic")
-    if wind > 15:
-        issues.append("high wind may blow away flyers")
-    if "rain" in desc.lower():
-        issues.append("rain reduces outdoor foot traffic significantly")
-    if "storm" in desc.lower():
-        issues.append("storm conditions — postpone outdoor flyering")
-    if "snow" in desc.lower():
-        issues.append("snow reduces foot traffic — focus on indoor spots")
-
-    if issues:
-        return "Challenging conditions: " + "; ".join(issues) + "."
-    return "Conditions acceptable for flyering."
+        return None
 
 
 # ---------------------------------------------------------------------------
-# UNC Event Intelligence
+# UNC Events Calendar (Live Scrape)
 # ---------------------------------------------------------------------------
 
-# Curated high-impact UNC events that affect Franklin Street traffic
-# These are the types of events that massively change foot traffic patterns
-UNC_EVENT_TYPES = {
-    "basketball_home": {
-        "traffic_multiplier": 2.5,
-        "best_flyering_window": "2-3 hours before game",
-        "notes": "Franklin Street floods with fans. Peak opportunity.",
-    },
-    "football_home": {
-        "traffic_multiplier": 3.0,
-        "best_flyering_window": "Morning of game day",
-        "notes": "Tailgating starts early. Massive foot traffic all day.",
-    },
-    "graduation": {
-        "traffic_multiplier": 2.0,
-        "best_flyering_window": "Not ideal — family-focused crowd",
-        "notes": "High traffic but wrong demographic for trivia night.",
-    },
-    "first_week": {
-        "traffic_multiplier": 1.8,
-        "best_flyering_window": "All week, especially evenings",
-        "notes": "New students exploring. Perfect for building audience.",
-    },
-    "home_game_win": {
-        "traffic_multiplier": 4.0,
-        "best_flyering_window": "Immediately after game",
-        "notes": "Franklin Street rushes after wins. Euphoric crowd.",
-    },
-    "exam_week": {
-        "traffic_multiplier": 0.4,
-        "best_flyering_window": "Library areas only",
-        "notes": "Students are studying. Low bar traffic. Skip flyering.",
-    },
-    "spring_break": {
-        "traffic_multiplier": 0.2,
-        "best_flyering_window": "Skip this week entirely",
-        "notes": "Campus empty. Save your flyers.",
-    },
-    "normal_weekday": {
-        "traffic_multiplier": 1.0,
-        "best_flyering_window": "11am-1pm and 5pm-7pm",
-        "notes": "Standard foot traffic patterns.",
-    },
-    "normal_weekend": {
-        "traffic_multiplier": 1.3,
-        "best_flyering_window": "Evening, 7pm-11pm",
-        "notes": "Weekend bar traffic is higher.",
-    },
-}
-
-
-def get_event_context():
+def fetch_unc_events():
     """
-    Return current event context for Chapel Hill.
-    In production, this would scrape the UNC events calendar.
-    For now, returns day-of-week based context with event type database.
+    Fetch upcoming events from UNC Chapel Hill's public calendar.
+    Scrapes the Localist-powered calendar JSON endpoint.
+    Returns list of event dicts or None.
     """
-    now = datetime.now()
-    dow = now.weekday()
-    month = now.month
+    cached = _read_cache("unc_events", max_age_hours=2)
+    if cached:
+        return cached
 
-    # Determine likely event context
-    if month in (5, 12) and 1 <= now.day <= 15:
-        event_type = "exam_week"
-    elif month == 3 and 8 <= now.day <= 16:
-        event_type = "spring_break"
-    elif month in (8, 1) and 15 <= now.day <= 25:
-        event_type = "first_week"
-    elif dow < 5:
-        event_type = "normal_weekday"
-    else:
-        event_type = "normal_weekend"
+    # UNC uses Localist which exposes a JSON API
+    url = "https://calendar.unc.edu/api/2/events?days=7&pp=20"
 
-    event_info = UNC_EVENT_TYPES[event_type]
+    try:
+        resp = requests.get(url, timeout=15, headers={
+            "User-Agent": "PanopticonBot/1.0 (academic research tool)",
+        })
+        resp.raise_for_status()
+        data = resp.json()
 
-    return {
-        "event_type": event_type,
-        "traffic_multiplier": event_info["traffic_multiplier"],
-        "best_flyering_window": event_info["best_flyering_window"],
-        "notes": event_info["notes"],
-        "day_of_week": now.strftime("%A"),
-        "date": now.strftime("%Y-%m-%d"),
-        "all_event_types": UNC_EVENT_TYPES,
-    }
+        events = []
+        for item in data.get("events", []):
+            event = item.get("event", {})
+            events.append({
+                "title": event.get("title", ""),
+                "description": (event.get("description_text", "") or "")[:200],
+                "location": event.get("location_name", ""),
+                "url": event.get("localist_url", ""),
+                "start": event.get("first_date", ""),
+                "end": event.get("last_date", ""),
+                "tags": [
+                    f.get("name", "") for f in event.get("filters", {}).get("event_types", [])
+                ],
+            })
 
+        _write_cache("unc_events", events)
+        print(f"  [+] UNC Events: {len(events)} upcoming events")
+        return events
 
-# ---------------------------------------------------------------------------
-# Social Signal Estimation
-# ---------------------------------------------------------------------------
-
-# Estimated social media reach for Franklin Street venues
-# Based on typical Instagram/TikTok posting patterns for college towns
-SOCIAL_SIGNALS = {
-    "franklin_street": {
-        "avg_instagram_posts_per_day": 150,
-        "avg_tiktok_mentions_per_week": 45,
-        "peak_posting_hours": [19, 20, 21, 22, 23],
-        "top_hashtags": [
-            "#FranklinStreet", "#UNC", "#ChapelHill", "#TarHeels",
-            "#GoHeels", "#UNCChapelHill", "#FranklinSt",
-        ],
-        "estimated_monthly_reach": 250000,
-    },
-    "bandidos": {
-        "avg_instagram_posts_per_day": 8,
-        "estimated_followers": 3200,
-        "top_hashtags": ["#Bandidos", "#BandidosCH", "#FranklinStreet"],
-    },
-}
-
-
-def get_social_signals():
-    """Return social media signal estimates for Franklin Street."""
-    return SOCIAL_SIGNALS
+    except Exception as e:
+        print(f"  [!] UNC Events error: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -400,13 +245,17 @@ def get_social_signals():
 
 def build_intel_report():
     """
-    Build a comprehensive OSINT intelligence report combining
-    all available data sources.
+    Build intelligence report from live API sources only.
+    Returns None for any feed that fails — no fake data.
     """
     return {
-        "demographics": get_demographics(),
+        "demographics": fetch_demographics(),
         "weather": fetch_weather(),
-        "event_context": get_event_context(),
-        "social_signals": get_social_signals(),
+        "unc_events": fetch_unc_events(),
+        "data_sources": {
+            "census": "live" if os.environ.get("CENSUS_API_KEY") else "unavailable (set CENSUS_API_KEY)",
+            "weather": "live" if os.environ.get("OPENWEATHER_API_KEY") else "unavailable (set OPENWEATHER_API_KEY)",
+            "unc_events": "live (no key needed)",
+        },
         "generated_at": datetime.now().isoformat(),
     }

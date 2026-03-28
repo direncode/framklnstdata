@@ -1,17 +1,22 @@
 """
 ==============================================
   FRANKLIN STREET PANOPTICON v3
-  Deep OSINT Intelligence Module
+  Live OSINT Module
 ==============================================
-Yelp sentiment analysis, event scraping, business
-license data, crime incident clustering, transit
-routes, and multi-source intelligence fusion.
+All data is API-fetched. No hardcoded fake data.
+
+Sources:
+  - Chapel Hill Transit GTFS (public, free)
+  - Chapel Hill Open Data / ArcGIS (public, free)
+  - NC ABC Commission (public records, scraped)
+  - Reddit API (public, free via JSON endpoint)
 """
 
 import json
 import os
-import re
 import math
+import csv
+import io
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -33,481 +38,281 @@ def _cache_path():
     return path
 
 
-def _cache_age_hours(key):
+def _read_cache(key, max_age_hours=6):
     fp = os.path.join(_cache_path(), f"{key}.json")
     if not os.path.exists(fp):
-        return float("inf")
+        return None
     mtime = datetime.fromtimestamp(os.path.getmtime(fp))
-    return (datetime.now() - mtime).total_seconds() / 3600
-
-
-def _read_cache(key):
+    if (datetime.now() - mtime) > timedelta(hours=max_age_hours):
+        return None
     try:
-        with open(os.path.join(_cache_path(), f"{key}.json")) as f:
+        with open(fp) as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (json.JSONDecodeError, IOError):
         return None
 
 
 def _write_cache(key, data):
-    with open(os.path.join(_cache_path(), f"{key}.json"), "w") as f:
+    fp = os.path.join(_cache_path(), f"{key}.json")
+    with open(fp, "w") as f:
         json.dump(data, f, indent=2, default=str)
 
 
 # ---------------------------------------------------------------------------
-# Yelp Venue Intelligence
+# Chapel Hill Transit GTFS (Live)
 # ---------------------------------------------------------------------------
 
-# Curated Yelp-equivalent data for Franklin Street venues
-# (Uses fallback data; live Yelp API requires key at $8/1000 calls)
-VENUE_INTELLIGENCE = {
-    "Bandidos": {
-        "rating": 4.2,
-        "review_count": 487,
-        "price": "$$",
-        "categories": ["Mexican", "Bar"],
-        "sentiment_summary": "Strong positive for food quality and atmosphere. "
-            "Occasional complaints about wait times on busy nights.",
-        "sentiment_score": 0.72,
-        "top_positive": ["great tacos", "fun atmosphere", "good margaritas"],
-        "top_negative": ["long wait", "loud music", "crowded"],
-        "peak_review_hours": [19, 20, 21],
-        "trend": "stable",
-    },
-    "Top of the Hill": {
-        "rating": 4.0,
-        "review_count": 1243,
-        "price": "$$",
-        "categories": ["Brewery", "American", "Bar"],
-        "sentiment_summary": "Beloved institution. Views get top marks. "
-            "Some feel quality has declined from peak years.",
-        "sentiment_score": 0.68,
-        "top_positive": ["great view", "local brewery", "iconic"],
-        "top_negative": ["overpriced", "slow service", "tourist trap"],
-        "peak_review_hours": [18, 19, 20, 21],
-        "trend": "slight_decline",
-    },
-    "He's Not Here": {
-        "rating": 4.3,
-        "review_count": 892,
-        "price": "$",
-        "categories": ["Bar", "Dive Bar"],
-        "sentiment_summary": "UNC institution. Blue cups are legendary. "
-            "Not about the food — it's about the experience.",
-        "sentiment_score": 0.81,
-        "top_positive": ["blue cups", "college tradition", "cheap beer", "fun"],
-        "top_negative": ["dirty", "no food", "crowded weekends"],
-        "peak_review_hours": [21, 22, 23],
-        "trend": "stable",
-    },
-    "Carolina Coffee Shop": {
-        "rating": 4.1,
-        "review_count": 654,
-        "price": "$",
-        "categories": ["Diner", "Breakfast", "Coffee"],
-        "sentiment_summary": "Historic Chapel Hill diner. Breakfast is the star. "
-            "Regulars love it, newcomers find it charming.",
-        "sentiment_score": 0.75,
-        "top_positive": ["classic diner", "great breakfast", "friendly staff"],
-        "top_negative": ["small portions", "cash only", "slow mornings"],
-        "peak_review_hours": [8, 9, 10, 12],
-        "trend": "stable",
-    },
-    "Linda's Bar & Grill": {
-        "rating": 4.0,
-        "review_count": 573,
-        "price": "$$",
-        "categories": ["Bar", "American"],
-        "sentiment_summary": "Solid bar with good food. Outdoor seating is the draw. "
-            "Gets rowdy on weekends.",
-        "sentiment_score": 0.70,
-        "top_positive": ["outdoor seating", "good burgers", "chill vibe"],
-        "top_negative": ["noisy", "slow service weekends", "pricey drinks"],
-        "peak_review_hours": [19, 20, 21, 22],
-        "trend": "stable",
-    },
-}
-
-
-def get_venue_intelligence(venue_name=None):
+def fetch_transit_stops():
     """
-    Get Yelp-style venue intelligence.
-    If venue_name specified, returns single venue. Otherwise returns all.
+    Fetch bus stops near Franklin Street from Chapel Hill Transit GTFS.
+    Chapel Hill Transit publishes GTFS at a public URL.
+    Returns list of stop dicts or None.
     """
-    if venue_name:
-        # Fuzzy match
-        for key, data in VENUE_INTELLIGENCE.items():
-            if key.lower() in venue_name.lower() or venue_name.lower() in key.lower():
-                return {key: data}
-        return {}
-    return VENUE_INTELLIGENCE
+    cached = _read_cache("transit_stops", max_age_hours=168)
+    if cached:
+        return cached
 
+    # Chapel Hill Transit GTFS feed
+    gtfs_url = "https://www.townofchapelhill.org/home/showpublisheddocument/45131"
 
-def get_sentiment_rankings():
-    """Rank venues by sentiment score."""
-    rankings = []
-    for name, data in VENUE_INTELLIGENCE.items():
-        rankings.append({
-            "venue": name,
-            "sentiment_score": data["sentiment_score"],
-            "rating": data["rating"],
-            "review_count": data["review_count"],
-            "trend": data["trend"],
-            "top_positive": data["top_positive"][0],
-            "top_negative": data["top_negative"][0],
-        })
-    rankings.sort(key=lambda r: r["sentiment_score"], reverse=True)
-    return rankings
+    try:
+        resp = requests.get(gtfs_url, timeout=30)
+        resp.raise_for_status()
+
+        import zipfile
+        import io as iomod
+
+        z = zipfile.ZipFile(iomod.BytesIO(resp.content))
+
+        stops = []
+        if "stops.txt" in z.namelist():
+            with z.open("stops.txt") as f:
+                reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+                for row in reader:
+                    try:
+                        lat = float(row.get("stop_lat", 0))
+                        lon = float(row.get("stop_lon", 0))
+                    except (ValueError, TypeError):
+                        continue
+
+                    # Filter to Franklin Street area
+                    if (FRANKLIN_STREET_BOUNDS["south"] - 0.005 <= lat <= FRANKLIN_STREET_BOUNDS["north"] + 0.005
+                        and FRANKLIN_STREET_BOUNDS["west"] - 0.005 <= lon <= FRANKLIN_STREET_BOUNDS["east"] + 0.005):
+                        stops.append({
+                            "stop_id": row.get("stop_id", ""),
+                            "stop_name": row.get("stop_name", ""),
+                            "lat": lat,
+                            "lon": lon,
+                        })
+
+        if stops:
+            _write_cache("transit_stops", stops)
+            print(f"  [+] Transit: {len(stops)} stops near Franklin St")
+        return stops if stops else None
+
+    except Exception as e:
+        print(f"  [!] Transit GTFS error: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
-# Crime Data Intelligence
+# Chapel Hill Open Data - Crime/Incidents (Live)
 # ---------------------------------------------------------------------------
 
-# Chapel Hill PD crime incident data (curated from public records)
-# Focused on Franklin Street corridor
-CRIME_DATA = {
-    "summary": {
-        "reporting_period": "2023-2024",
-        "total_incidents_franklin_st": 342,
-        "source": "Chapel Hill Police Department (public records)",
-    },
-    "hotspots": [
-        {
-            "location": "100 Block E Franklin St",
-            "lat": 35.9131,
-            "lon": -79.0555,
-            "incident_count": 87,
-            "primary_types": ["Public intoxication", "Noise complaint", "Theft"],
-            "peak_hours": [23, 0, 1, 2],
-            "safety_note": "Bar district — incidents mostly alcohol-related",
-        },
-        {
-            "location": "Franklin & Columbia Intersection",
-            "lat": 35.9131,
-            "lon": -79.0540,
-            "incident_count": 45,
-            "primary_types": ["Traffic violation", "Pedestrian incident", "Theft"],
-            "peak_hours": [17, 18, 22, 23],
-            "safety_note": "High-traffic intersection, mostly minor",
-        },
-        {
-            "location": "200 Block W Franklin St",
-            "lat": 35.9128,
-            "lon": -79.0575,
-            "incident_count": 38,
-            "primary_types": ["Noise complaint", "Trespass", "Vandalism"],
-            "peak_hours": [22, 23, 0, 1],
-            "safety_note": "Late-night bar area, typical college town issues",
-        },
-    ],
-    "monthly_trend": {
-        "Jan": 22, "Feb": 20, "Mar": 28, "Apr": 32, "May": 18,
-        "Jun": 15, "Jul": 14, "Aug": 25, "Sep": 35, "Oct": 38,
-        "Nov": 30, "Dec": 25,
-    },
-    "day_of_week": {
-        "Monday": 28, "Tuesday": 30, "Wednesday": 35,
-        "Thursday": 52, "Friday": 68, "Saturday": 78,
-        "Sunday": 51,
-    },
-}
-
-
-def get_crime_data():
-    """Return crime incident data for Franklin Street area."""
-    return CRIME_DATA
-
-
-def get_safety_score(lat, lon, radius_km=0.1):
+def fetch_crime_data():
     """
-    Compute a safety score (0-100, higher = safer) for a location
-    based on nearby crime hotspot proximity.
+    Fetch crime/incident data from Chapel Hill's ArcGIS open data portal.
+    Returns list of incident dicts or None.
     """
-    total_risk = 0
-    for hotspot in CRIME_DATA["hotspots"]:
-        dist = _haversine(lat, lon, hotspot["lat"], hotspot["lon"])
-        if dist < radius_km:
-            # Inverse distance weighting
-            weight = 1 / max(dist, 0.01)
-            total_risk += hotspot["incident_count"] * weight
+    cached = _read_cache("crime_incidents", max_age_hours=24)
+    if cached:
+        return cached
 
-    # Normalize to 0-100 (inverse: more risk = lower score)
-    max_risk = 500  # calibration value
-    safety = max(0, min(100, 100 - (total_risk / max_risk * 100)))
-    return round(safety)
+    # Chapel Hill publishes incident data via ArcGIS
+    bounds = FRANKLIN_STREET_BOUNDS
+    bbox = f"{bounds['west']},{bounds['south']},{bounds['east']},{bounds['north']}"
 
+    url = (
+        "https://services1.arcgis.com/jOyGkcqHAywMxJEv/arcgis/rest/services"
+        "/Police_Incidents/FeatureServer/0/query"
+        f"?where=1%3D1&outFields=*&geometry={bbox}"
+        f"&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326"
+        f"&resultRecordCount=200&f=json"
+    )
 
-# ---------------------------------------------------------------------------
-# Transit Intelligence (Chapel Hill Transit)
-# ---------------------------------------------------------------------------
+    try:
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
 
-# Chapel Hill Transit bus routes near Franklin Street
-# Source: Chapel Hill Transit GTFS data (public)
-TRANSIT_ROUTES = {
-    "routes": [
-        {
-            "route": "NS",
-            "name": "North-South",
-            "stops_near_franklin": [
-                {"name": "Franklin St at Columbia", "lat": 35.9131, "lon": -79.0540},
-                {"name": "Franklin St at Church", "lat": 35.9134, "lon": -79.0520},
-            ],
-            "frequency_min": 15,
-            "hours": "6:30am-11:30pm",
-            "ridership_daily": 2800,
-        },
-        {
-            "route": "T",
-            "name": "T Route (Campus)",
-            "stops_near_franklin": [
-                {"name": "S Columbia at Franklin", "lat": 35.9128, "lon": -79.0538},
-            ],
-            "frequency_min": 12,
-            "hours": "7:00am-6:00pm",
-            "ridership_daily": 1900,
-        },
-        {
-            "route": "U",
-            "name": "U Route (University Place)",
-            "stops_near_franklin": [
-                {"name": "University Place", "lat": 35.9218, "lon": -79.0444},
-            ],
-            "frequency_min": 20,
-            "hours": "6:45am-10:30pm",
-            "ridership_daily": 2200,
-        },
-        {
-            "route": "NU",
-            "name": "NU Route",
-            "stops_near_franklin": [
-                {"name": "Franklin St at Henderson", "lat": 35.9130, "lon": -79.0562},
-            ],
-            "frequency_min": 30,
-            "hours": "6:30am-11:00pm",
-            "ridership_daily": 1500,
-        },
-    ],
-    "total_daily_ridership_near_franklin": 8400,
-    "source": "Chapel Hill Transit GTFS (public data)",
-}
-
-
-def get_transit_data():
-    """Return transit route and stop data near Franklin Street."""
-    return TRANSIT_ROUTES
-
-
-def get_transit_stops():
-    """Get all transit stops near Franklin Street as flat list."""
-    stops = []
-    for route in TRANSIT_ROUTES["routes"]:
-        for stop in route["stops_near_franklin"]:
-            stops.append({
-                **stop,
-                "route": route["route"],
-                "route_name": route["name"],
-                "frequency_min": route["frequency_min"],
-                "ridership_daily": route["ridership_daily"],
+        incidents = []
+        for feature in data.get("features", []):
+            attrs = feature.get("attributes", {})
+            geom = feature.get("geometry", {})
+            incidents.append({
+                "type": attrs.get("OFFENSE_DESCRIPTION", attrs.get("offense_description", "")),
+                "date": attrs.get("DATE_REPORTED", attrs.get("date_reported", "")),
+                "location": attrs.get("LOCATION", attrs.get("location", "")),
+                "lat": geom.get("y"),
+                "lon": geom.get("x"),
             })
-    return stops
+
+        if incidents:
+            _write_cache("crime_incidents", incidents)
+            print(f"  [+] Crime data: {len(incidents)} incidents")
+        return incidents if incidents else None
+
+    except Exception as e:
+        print(f"  [!] Crime data error: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
-# Business License Intelligence
+# Reddit - UNC/Chapel Hill Live Feed
 # ---------------------------------------------------------------------------
 
-# NC ABC (Alcohol Beverage Control) license data for Franklin Street
-# Source: NC ABC Commission (public records)
-ABC_LICENSES = [
-    {
-        "name": "Bandidos Mexican Restaurant",
-        "address": "159 1/2 E Franklin St",
-        "permit_type": "Mixed Beverage (Restaurant)",
-        "status": "Active",
-        "capacity_est": 120,
-    },
-    {
-        "name": "Top of the Hill Restaurant & Brewery",
-        "address": "100 E Franklin St",
-        "permit_type": "Brewery + Mixed Beverage",
-        "status": "Active",
-        "capacity_est": 250,
-    },
-    {
-        "name": "He's Not Here",
-        "address": "112 1/2 W Franklin St",
-        "permit_type": "On-Premises Malt Beverage",
-        "status": "Active",
-        "capacity_est": 180,
-    },
-    {
-        "name": "Linda's Bar and Grill",
-        "address": "203 E Franklin St",
-        "permit_type": "Mixed Beverage (Restaurant)",
-        "status": "Active",
-        "capacity_est": 100,
-    },
-    {
-        "name": "The Crunkleton",
-        "address": "320 W Franklin St",
-        "permit_type": "Private Club (Brown Bagging)",
-        "status": "Active",
-        "capacity_est": 60,
-    },
-]
-
-
-def get_abc_licenses():
-    """Return NC ABC license data for Franklin Street venues."""
-    return ABC_LICENSES
-
-
-# ---------------------------------------------------------------------------
-# Event Intelligence (Scraping-Ready)
-# ---------------------------------------------------------------------------
-
-# Curated upcoming event patterns
-# In production, would scrape Eventbrite, Facebook Events, UNC Calendar
-EVENT_PATTERNS = {
-    "recurring": [
-        {
-            "name": "Trivia Night at Bandidos",
-            "venue": "Bandidos",
-            "day": "Wednesday",
-            "time": "8:00 PM",
-            "estimated_attendance": 40,
-            "type": "trivia",
-        },
-        {
-            "name": "Live Music at Local 506",
-            "venue": "Local 506",
-            "day": "Friday",
-            "time": "9:00 PM",
-            "estimated_attendance": 150,
-            "type": "music",
-        },
-        {
-            "name": "Open Mic at Cat's Cradle",
-            "venue": "Cat's Cradle",
-            "day": "Thursday",
-            "time": "8:00 PM",
-            "estimated_attendance": 80,
-            "type": "music",
-        },
-    ],
-    "seasonal": {
-        "basketball_season": {
-            "months": [11, 12, 1, 2, 3],
-            "avg_home_games_per_month": 4,
-            "traffic_impact": "Major — plan flyering around game times",
-        },
-        "football_season": {
-            "months": [9, 10, 11],
-            "avg_home_games_per_month": 2,
-            "traffic_impact": "Massive — entire Franklin Street transforms",
-        },
-        "graduation": {
-            "months": [5, 12],
-            "traffic_impact": "High family traffic, different demographic",
-        },
-    },
-}
-
-
-def get_event_patterns():
-    """Return event intelligence for Franklin Street area."""
-    return EVENT_PATTERNS
-
-
-def get_competing_events(day_of_week=None):
+def fetch_reddit_posts(subreddit="UNC", limit=25):
     """
-    Find events competing for attention on a given day.
-    Helps trivia night planners avoid conflicts.
+    Fetch recent posts from r/UNC and r/chapelhill via Reddit JSON API.
+    No API key needed — uses public .json endpoint.
+    Returns list of post dicts or None.
     """
-    if day_of_week is None:
-        day_of_week = datetime.now().strftime("%A")
+    cache_key = f"reddit_{subreddit}"
+    cached = _read_cache(cache_key, max_age_hours=0.5)
+    if cached:
+        return cached
 
-    competing = []
-    for event in EVENT_PATTERNS["recurring"]:
-        if event["day"].lower() == day_of_week.lower():
-            competing.append(event)
+    url = f"https://www.reddit.com/r/{subreddit}/new.json?limit={limit}"
 
-    return {
-        "day": day_of_week,
-        "competing_events": competing,
-        "competition_level": (
-            "High" if len(competing) > 2
-            else "Medium" if len(competing) > 0
-            else "Low"
-        ),
-        "recommendation": (
-            f"There are {len(competing)} competing events on {day_of_week}. "
-            + ("Consider a different night." if len(competing) > 2
-               else "Manageable competition." if len(competing) > 0
-               else "Great night for trivia — low competition!")
-        ),
-    }
+    try:
+        resp = requests.get(url, timeout=15, headers={
+            "User-Agent": "PanopticonBot/1.0 (academic research tool)",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+
+        posts = []
+        for child in data.get("data", {}).get("children", []):
+            post = child.get("data", {})
+            posts.append({
+                "title": post.get("title", ""),
+                "subreddit": post.get("subreddit", ""),
+                "score": post.get("score", 0),
+                "num_comments": post.get("num_comments", 0),
+                "created_utc": post.get("created_utc", 0),
+                "url": f"https://reddit.com{post.get('permalink', '')}",
+                "flair": post.get("link_flair_text", ""),
+                "selftext": (post.get("selftext", "") or "")[:300],
+            })
+
+        if posts:
+            _write_cache(cache_key, posts)
+            print(f"  [+] Reddit r/{subreddit}: {len(posts)} posts")
+        return posts if posts else None
+
+    except Exception as e:
+        print(f"  [!] Reddit r/{subreddit} error: {e}")
+        return None
+
+
+def fetch_all_reddit():
+    """Fetch from multiple UNC/Chapel Hill subreddits."""
+    results = {}
+    for sub in ["UNC", "chapelhill", "NorthCarolina"]:
+        posts = fetch_reddit_posts(sub)
+        if posts:
+            results[sub] = posts
+    return results if results else None
 
 
 # ---------------------------------------------------------------------------
-# Pedestrian Count Estimation
+# NC ABC License Lookup (Live)
+# ---------------------------------------------------------------------------
+
+def fetch_abc_licenses():
+    """
+    Search NC ABC Commission permit database for Franklin Street venues.
+    The NC ABC publishes permit data that can be queried.
+    Returns list of license dicts or None.
+    """
+    cached = _read_cache("abc_licenses", max_age_hours=720)
+    if cached:
+        return cached
+
+    # NC ABC permit search API
+    url = (
+        "https://abc.nc.gov/Permits/SearchResults"
+        "?City=Chapel+Hill&County=ORANGE&PermitType=&Status=Active"
+    )
+
+    try:
+        resp = requests.get(url, timeout=15, headers={
+            "User-Agent": "PanopticonBot/1.0 (academic research tool)",
+        })
+        if resp.status_code != 200:
+            return None
+
+        # Parse HTML table (simple extraction)
+        text = resp.text
+        licenses = []
+
+        # Look for table rows with permit data
+        import re
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', text, re.DOTALL)
+        for row in rows:
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+            if len(cells) >= 4:
+                name = re.sub(r'<[^>]+>', '', cells[0]).strip()
+                address = re.sub(r'<[^>]+>', '', cells[1]).strip()
+                permit_type = re.sub(r'<[^>]+>', '', cells[2]).strip()
+                status = re.sub(r'<[^>]+>', '', cells[3]).strip()
+
+                if name and "franklin" in address.lower():
+                    licenses.append({
+                        "name": name,
+                        "address": address,
+                        "permit_type": permit_type,
+                        "status": status,
+                    })
+
+        if licenses:
+            _write_cache("abc_licenses", licenses)
+            print(f"  [+] ABC Licenses: {len(licenses)} on Franklin St")
+        return licenses if licenses else None
+
+    except Exception as e:
+        print(f"  [!] ABC license lookup error: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Pedestrian Count from Live Sources
 # ---------------------------------------------------------------------------
 
 def estimate_pedestrian_flow(hour=None, day_of_week=None):
     """
-    Estimate pedestrian flow on Franklin Street using multi-source
-    fusion: transit ridership + venue busyness + campus schedule +
-    time-of-day patterns.
-
-    Returns estimated pedestrians per hour at key segments.
+    Estimate pedestrian flow using live transit data as a base signal.
+    If no transit data available, returns None instead of fake numbers.
     """
     if hour is None:
         hour = datetime.now().hour
     if day_of_week is None:
         day_of_week = datetime.now().weekday()
 
-    # Base hourly pattern (pedestrians per hour on typical weekday)
-    base_hourly = [
-        20, 10, 5, 5, 5, 10,       # 0-5am
-        30, 80, 200, 350, 400, 500, # 6-11am
-        600, 550, 450, 400, 350, 400, # 12-5pm
-        500, 600, 700, 650, 500, 300, # 6-11pm
-    ]
+    stops = fetch_transit_stops()
+    if not stops:
+        return None
 
-    # Day-of-week multipliers
-    dow_mult = [0.9, 0.9, 1.0, 1.2, 1.5, 1.6, 1.1]
-    multiplier = dow_mult[day_of_week]
-
-    # Transit contribution (people arriving by bus)
-    transit_hourly_pct = [
-        0, 0, 0, 0, 0, 0,
-        0.02, 0.05, 0.08, 0.08, 0.07, 0.08,
-        0.08, 0.07, 0.07, 0.06, 0.06, 0.05,
-        0.04, 0.03, 0.02, 0.01, 0, 0,
-    ]
-    transit_daily = TRANSIT_ROUTES["total_daily_ridership_near_franklin"]
-    transit_this_hour = int(transit_daily * transit_hourly_pct[hour])
-
-    base = int(base_hourly[hour] * multiplier)
-    total = base + transit_this_hour
+    # Use number of nearby stops as a proxy for transit accessibility
+    stop_count = len(stops)
 
     return {
         "hour": hour,
         "day_of_week": day_of_week,
-        "estimated_pedestrians_per_hour": total,
-        "base_foot_traffic": base,
-        "transit_contribution": transit_this_hour,
-        "day_multiplier": multiplier,
-        "confidence": "medium",
-        "methodology": (
-            "Multi-source fusion: base hourly pattern × day-of-week "
-            "multiplier + transit ridership allocation"
-        ),
-        "full_day_profile": [
-            int(base_hourly[h] * multiplier + transit_daily * transit_hourly_pct[h])
-            for h in range(24)
-        ],
+        "nearby_transit_stops": stop_count,
+        "data_source": "Chapel Hill Transit GTFS (live)",
+        "note": "Transit stop density used as pedestrian flow proxy",
+        "fetched_at": datetime.now().isoformat(),
     }
 
 
@@ -516,32 +321,18 @@ def estimate_pedestrian_flow(hour=None, day_of_week=None):
 # ---------------------------------------------------------------------------
 
 def build_deep_osint_report():
-    """Build comprehensive OSINT intelligence report."""
+    """Build OSINT report from live sources only. None = data unavailable."""
     return {
-        "venue_intelligence": get_venue_intelligence(),
-        "sentiment_rankings": get_sentiment_rankings(),
-        "crime_data": get_crime_data(),
-        "transit_data": get_transit_data(),
-        "abc_licenses": get_abc_licenses(),
-        "event_patterns": get_event_patterns(),
-        "competing_events": get_competing_events(),
+        "reddit": fetch_all_reddit(),
+        "transit_stops": fetch_transit_stops(),
+        "crime_data": fetch_crime_data(),
+        "abc_licenses": fetch_abc_licenses(),
         "pedestrian_estimate": estimate_pedestrian_flow(),
+        "data_sources": {
+            "reddit": "live (no key needed)",
+            "transit": "live GTFS (no key needed)",
+            "crime": "live ArcGIS (no key needed)",
+            "abc_licenses": "live NC ABC (no key needed)",
+        },
         "generated_at": datetime.now().isoformat(),
     }
-
-
-# ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
-
-def _haversine(lat1, lon1, lat2, lon2):
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-    return R * 2 * math.asin(math.sqrt(a))

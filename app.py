@@ -68,7 +68,7 @@ from traffic import (
 )
 from trends import build_trends_report, generate_trivia_suggestions
 from satellite import TILE_SOURCES, PYDECK_VIEWS, get_folium_tile_layers
-from intel import build_intel_report, get_demographics, fetch_weather, get_event_context
+from intel import build_intel_report, fetch_demographics, fetch_weather, fetch_unc_events
 from network import (
     fetch_street_network,
     find_intersections,
@@ -92,23 +92,18 @@ from buildings import (
     compute_viewshed_for_spots,
 )
 from osint import (
-    get_venue_intelligence,
-    get_sentiment_rankings,
-    get_crime_data,
-    get_transit_data,
-    get_transit_stops,
-    get_abc_licenses,
-    get_competing_events,
-    estimate_pedestrian_flow,
+    fetch_transit_stops,
+    fetch_crime_data,
+    fetch_abc_licenses,
+    fetch_all_reddit,
     build_deep_osint_report,
 )
 from forecast import (
-    forecast_traffic,
-    forecast_best_flyering_windows,
-    decompose_seasonal,
+    forecast_from_live_data,
     simulate_event_impact,
-    EVENT_ANOMALIES,
+    build_forecast_report,
 )
+from livefeed import build_live_feed
 
 # ---------------------------------------------------------------------------
 # Header
@@ -174,20 +169,28 @@ show_intersections = st.sidebar.checkbox("Intersection Nodes", value=True)
 
 # API Status Panel
 with st.sidebar.expander("📊 SYSTEM STATUS"):
+    import os
     st.markdown(f"**Time:** {datetime.now().strftime('%H:%M:%S')}")
     if GOOGLE_PLACES_API_KEY:
         st.markdown("🟢 Google Places: ACTIVE")
     else:
-        st.markdown("🟡 Google Places: FALLBACK")
+        st.markdown("⚫ Google Places: NO KEY")
     st.markdown("🟢 OpenStreetMap: ACTIVE")
-    st.markdown("🟢 NCDOT AADT: ACTIVE")
-    st.markdown("🟢 Census Data: ACTIVE")
-    weather = fetch_weather()
-    st.markdown(
-        f"🌤️ Weather: {weather['temp_f']}°F, {weather['description']}"
-    )
-    event = get_event_context()
-    st.markdown(f"📅 Event: {event['event_type'].replace('_', ' ').title()}")
+    if os.environ.get("OPENWEATHER_API_KEY"):
+        weather = fetch_weather()
+        if weather:
+            st.markdown(f"🟢 Weather: {weather['temp_f']}°F, {weather['description']}")
+        else:
+            st.markdown("🔴 Weather: API ERROR")
+    else:
+        st.markdown("⚫ Weather: NO KEY")
+    if os.environ.get("CENSUS_API_KEY"):
+        st.markdown("🟢 Census: ACTIVE")
+    else:
+        st.markdown("⚫ Census: NO KEY")
+    st.markdown("🟢 Reddit: ACTIVE (no key)")
+    st.markdown("🟢 UNC Calendar: ACTIVE (no key)")
+    st.markdown("🟢 DTH RSS: ACTIVE (no key)")
 
 # ---------------------------------------------------------------------------
 # Data Loading (Cached)
@@ -764,255 +767,200 @@ with tab_spatial:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 6: OSINT INTELLIGENCE
+# TAB 6: INTEL (Live APIs Only)
 # ═══════════════════════════════════════════════════════════════
 with tab_intel:
-    st.subheader("🕵️ OSINT Intelligence Briefing")
+    st.subheader("🕵️ Live Intelligence Briefing")
 
-    # Demographics
+    # Demographics (requires CENSUS_API_KEY)
     st.markdown("### 📊 Population Demographics")
-    demo = get_demographics()
+    demo = fetch_demographics()
+    if demo:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Population", f"{demo['total_population']:,}")
+        c2.metric("Median Age", f"{demo.get('median_age', 'N/A')}")
+        c3.metric("School Enrollment", f"{demo.get('school_enrollment', 'N/A'):,}" if demo.get('school_enrollment') else "N/A")
+        c4.metric("Age 18-24", f"{demo.get('pct_18_24', 'N/A')}%")
+        st.caption(f"Source: {demo['source']}")
+    else:
+        st.info("Census data unavailable. Set `CENSUS_API_KEY` env var (free at api.census.gov)")
 
-    c1, c2, c3, c4 = st.columns(4)
-    d = demo["data"]
-    c1.metric("Total Population", f"{d['total_population']:,}")
-    c2.metric("Median Age", f"{d['median_age']}")
-    c3.metric("College Enrollment", f"{d['college_enrollment']:,}")
-    c4.metric("Pop. Density", f"{d['population_density_per_sq_mi']:,}/mi²")
+    st.markdown("---")
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Age 18-24", f"{d['pct_18_24']}%")
-    c6.metric("Bachelor's+", f"{d['pct_bachelors_or_higher']}%")
-    c7.metric("Renter-Occupied", f"{d['pct_renter_occupied']}%")
-    c8.metric("Median Income", f"${d['median_household_income']:,}")
-
-    with st.expander("📋 Demographic Insights for Trivia Marketing"):
-        for insight in demo["insights"]:
-            st.markdown(
-                f"**{insight['metric']}:** {insight['value']}\n\n"
-                f"→ {insight['insight']}"
-            )
-            st.markdown("---")
-
-    # Weather
+    # Weather (requires OPENWEATHER_API_KEY)
     st.markdown("### 🌤️ Weather Conditions")
     weather = fetch_weather()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Temperature", f"{weather['temp_f']}°F")
-    c2.metric("Feels Like", f"{weather['feels_like_f']}°F")
-    c3.metric("Humidity", f"{weather['humidity']}%")
-    c4.metric("Wind", f"{weather['wind_mph']} mph")
-
-    if weather["is_good_flyering_weather"]:
-        st.success(f"✅ {weather['weather_impact']}")
+    if weather:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Temperature", f"{weather['temp_f']}°F")
+        c2.metric("Feels Like", f"{weather['feels_like_f']}°F")
+        c3.metric("Humidity", f"{weather['humidity']}%")
+        c4.metric("Wind", f"{weather['wind_mph']} mph")
+        if weather.get("is_good_flyering_weather"):
+            st.success(f"✅ Good flyering weather: {weather['description']}")
+        else:
+            st.warning(f"⚠️ Challenging conditions: {weather['description']}")
+        st.caption(f"Source: {weather['source']}")
     else:
-        st.warning(f"⚠️ {weather['weather_impact']}")
+        st.info("Weather data unavailable. Set `OPENWEATHER_API_KEY` env var (free at openweathermap.org)")
 
-    # Event Context
-    st.markdown("### 📅 Event Intelligence")
-    event = get_event_context()
-    c1, c2 = st.columns(2)
-    c1.metric("Event Type", event["event_type"].replace("_", " ").title())
-    c2.metric("Traffic Multiplier", f"{event['traffic_multiplier']}x")
-    st.info(
-        f"**Best flyering window:** {event['best_flyering_window']}\n\n"
-        f"**Notes:** {event['notes']}"
-    )
+    st.markdown("---")
 
-    with st.expander("📋 All Event Types & Impact"):
-        for etype, edata in event["all_event_types"].items():
+    # UNC Events (no key needed)
+    st.markdown("### 📅 UNC Events (Next 7 Days)")
+    events = fetch_unc_events()
+    if events:
+        st.success(f"Found **{len(events)} upcoming events**")
+        for ev in events[:10]:
+            tags_str = ", ".join(ev.get("tags", [])[:3])
             st.markdown(
-                f"**{etype.replace('_', ' ').title()}** — "
-                f"Traffic: {edata['traffic_multiplier']}x | "
-                f"Best window: {edata['best_flyering_window']}"
+                f"• **{ev['title']}** — {ev.get('location', 'TBD')} | "
+                f"{ev.get('start', '')} {f'| Tags: {tags_str}' if tags_str else ''}"
             )
-            st.caption(edata["notes"])
+    else:
+        st.info("Could not fetch UNC events calendar")
 
-    # Social Signals
-    st.markdown("### 📱 Social Media Intelligence")
-    from intel import get_social_signals
-    social = get_social_signals()
-    fs = social["franklin_street"]
+    st.markdown("---")
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Instagram Posts/Day", f"~{fs['avg_instagram_posts_per_day']}")
-    c2.metric("TikTok Mentions/Week", f"~{fs['avg_tiktok_mentions_per_week']}")
-    c3.metric("Est. Monthly Reach", f"{fs['estimated_monthly_reach']:,}")
+    # Live Feed
+    st.markdown("### 📡 Live Keyword Feed")
+    feed = build_live_feed()
+    if feed.get("extracted_keywords"):
+        top_kw = feed["extracted_keywords"][:15]
+        st.markdown("**Top keywords across Reddit + DTH + Trends:**")
+        kw_str = " · ".join(f"`{k['keyword']}` ({k['frequency']})" for k in top_kw)
+        st.markdown(kw_str)
 
-    st.markdown(
-        "**Top Hashtags:** " +
-        " ".join(f"`{tag}`" for tag in fs["top_hashtags"])
-    )
-    peak_hours = ", ".join(f"{h}:00" for h in fs["peak_posting_hours"])
-    st.caption(f"Peak posting hours: {peak_hours}")
+    if feed.get("trivia_suggestions"):
+        st.markdown("### 💡 Live Trivia Suggestions")
+        for s in feed["trivia_suggestions"][:8]:
+            st.markdown(f"**[{s['source']}]** {s['suggestion']}")
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 7: DEEP OSINT
+# TAB 7: DEEP OSINT (All Live)
 # ═══════════════════════════════════════════════════════════════
 with tab_osint:
-    st.subheader("🔍 Deep OSINT Intelligence")
+    st.subheader("🔍 Deep OSINT Intelligence (Live Feeds)")
 
-    import pandas as pd
-
-    # Venue Sentiment Analysis
-    st.markdown("### 📝 Venue Sentiment Analysis")
-    rankings = get_sentiment_rankings()
-    for r in rankings:
-        trend_icon = "📈" if r["trend"] == "slight_decline" else "➡️"
-        st.markdown(
-            f"**{r['venue']}** — ⭐ {r['rating']} ({r['review_count']} reviews) "
-            f"| Sentiment: **{r['sentiment_score']:.0%}** {trend_icon}"
-        )
-        st.caption(f"✅ \"{r['top_positive']}\" | ❌ \"{r['top_negative']}\"")
-
-    st.markdown("---")
-
-    # Crime Intelligence
-    st.markdown("### 🚨 Crime Intelligence")
-    crime = get_crime_data()
-    st.markdown(f"*{crime['summary']['reporting_period']} — {crime['summary']['total_incidents_franklin_st']} total incidents*")
-
-    for hotspot in crime["hotspots"]:
-        st.markdown(
-            f"**{hotspot['location']}** — {hotspot['incident_count']} incidents | "
-            f"Types: {', '.join(hotspot['primary_types'][:2])}"
-        )
-        st.caption(f"⚠️ {hotspot['safety_note']}")
-
-    # Crime by day of week
-    dow_data = pd.DataFrame(
-        {"Day": list(crime["day_of_week"].keys()),
-         "Incidents": list(crime["day_of_week"].values())}
-    )
-    st.bar_chart(dow_data, x="Day", y="Incidents")
+    # Reddit Feed
+    st.markdown("### 📱 Reddit — r/UNC, r/chapelhill, r/NorthCarolina")
+    reddit = fetch_all_reddit()
+    if reddit:
+        for sub, posts in reddit.items():
+            st.markdown(f"**r/{sub}** — {len(posts)} recent posts")
+            for post in posts[:5]:
+                st.markdown(
+                    f"• [{post['score']}↑ {post['num_comments']}💬] "
+                    f"**{post['title'][:80]}**"
+                )
+    else:
+        st.info("Reddit data unavailable (network access required)")
 
     st.markdown("---")
 
-    # Transit Intelligence
-    st.markdown("### 🚌 Transit Intelligence")
-    transit = get_transit_data()
-    st.metric("Daily Ridership Near Franklin St",
-              f"{transit['total_daily_ridership_near_franklin']:,}")
-    for route in transit["routes"]:
-        st.markdown(
-            f"**Route {route['route']}** ({route['name']}) — "
-            f"Every {route['frequency_min']} min | "
-            f"{route['ridership_daily']:,} riders/day"
-        )
+    # Crime Intelligence (live from ArcGIS)
+    st.markdown("### 🚨 Crime Intelligence (Chapel Hill Open Data)")
+    crime = fetch_crime_data()
+    if crime:
+        st.success(f"**{len(crime)} incidents** from Chapel Hill ArcGIS")
+        for incident in crime[:10]:
+            st.markdown(
+                f"• **{incident.get('type', 'Unknown')}** — "
+                f"{incident.get('location', 'Unknown location')}"
+            )
+    else:
+        st.info("Crime data unavailable from Chapel Hill ArcGIS")
 
     st.markdown("---")
 
-    # ABC Licenses
-    st.markdown("### 🍺 ABC License Intelligence")
-    licenses = get_abc_licenses()
-    for lic in licenses:
-        st.markdown(
-            f"**{lic['name']}** — {lic['permit_type']} | "
-            f"Capacity: ~{lic['capacity_est']} | Status: {lic['status']}"
-        )
+    # Transit Stops (live GTFS)
+    st.markdown("### 🚌 Transit Stops (Chapel Hill Transit GTFS)")
+    stops = fetch_transit_stops()
+    if stops:
+        st.success(f"**{len(stops)} bus stops** near Franklin Street")
+        for stop in stops[:10]:
+            st.markdown(f"• **{stop['stop_name']}** — `{stop['lat']:.4f}, {stop['lon']:.4f}`")
+    else:
+        st.info("Transit GTFS data unavailable")
 
     st.markdown("---")
 
-    # Competing Events
-    st.markdown("### 🎯 Competition Analysis")
-    comp = get_competing_events(selected_day)
-    st.markdown(f"**Competition level for {selected_day}:** {comp['competition_level']}")
-    st.info(comp["recommendation"])
-    for ev in comp["competing_events"]:
-        st.markdown(f"• {ev['name']} at {ev['venue']} — {ev['time']} (~{ev['estimated_attendance']} ppl)")
-
-    st.markdown("---")
-
-    # Pedestrian Flow Estimate
-    st.markdown("### 🚶 Pedestrian Flow Estimate")
-    ped = estimate_pedestrian_flow(hour=selected_hour, day_of_week=selected_dow)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Est. Pedestrians/Hour", f"{ped['estimated_pedestrians_per_hour']:,}")
-    c2.metric("Base Traffic", f"{ped['base_foot_traffic']:,}")
-    c3.metric("Transit Contribution", f"{ped['transit_contribution']:,}")
-
-    ped_df = pd.DataFrame({
-        "Hour": list(range(24)),
-        "Pedestrians": ped["full_day_profile"],
-    })
-    st.area_chart(ped_df, x="Hour", y="Pedestrians", height=250)
+    # ABC Licenses (live from NC ABC)
+    st.markdown("### 🍺 ABC License Intelligence (NC ABC Commission)")
+    licenses = fetch_abc_licenses()
+    if licenses:
+        st.success(f"**{len(licenses)} active licenses** on Franklin Street")
+        for lic in licenses:
+            st.markdown(
+                f"• **{lic['name']}** — {lic.get('permit_type', 'N/A')} | "
+                f"{lic.get('address', '')}"
+            )
+    else:
+        st.info("ABC license data unavailable")
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 8: FORECAST
+# TAB 8: FORECAST (Live Signal-Based)
 # ═══════════════════════════════════════════════════════════════
 with tab_forecast:
-    st.subheader("📉 Predictive Traffic Forecasting")
+    st.subheader("📉 Live Signal Forecast")
+    st.caption("Predictions derived from live data feeds — not hardcoded baselines.")
 
-    import pandas as pd
+    # Live signal forecast
+    st.markdown("### 📡 Available Signals")
+    forecast = forecast_from_live_data()
 
-    # 24-hour forecast
-    st.markdown("### 24-Hour Traffic Forecast")
-    forecasts = forecast_traffic(hours_ahead=24)
-    forecast_df = pd.DataFrame({
-        "Hours From Now": [f["hours_from_now"] for f in forecasts],
-        "Predicted": [f["predicted_traffic"] for f in forecasts],
-        "Lower Bound": [f["lower_bound"] for f in forecasts],
-        "Upper Bound": [f["upper_bound"] for f in forecasts],
-    })
-    st.line_chart(forecast_df, x="Hours From Now",
-                  y=["Predicted", "Lower Bound", "Upper Bound"],
-                  height=300)
+    signal_count = forecast.get("signal_count", 0)
+    st.metric("Live Signals Available", f"{signal_count}/5")
 
-    st.markdown("---")
-
-    # Best flyering windows
-    st.markdown("### 🎯 Best Flyering Windows Today")
-    windows = forecast_best_flyering_windows(
-        day_of_week=selected_dow,
-        month=datetime.now().month,
-    )
-    for w in windows:
-        st.markdown(f"**{w['hour_label']}** ({w['period']}) — ~{w['predicted_traffic']} ped/hr")
-        st.caption(w["recommendation"])
-
-    st.markdown("---")
-
-    # Seasonal decomposition
-    st.markdown("### 📊 Seasonal Decomposition")
-    decomp = decompose_seasonal(day_of_week=selected_dow)
-    decomp_df = pd.DataFrame({
-        "Hour": list(range(24)),
-        "Observed": decomp["observed"],
-        "Trend": decomp["trend"],
-        "Seasonal": decomp["seasonal"],
-    })
-    st.line_chart(decomp_df, x="Hour",
-                  y=["Observed", "Trend", "Seasonal"],
-                  height=300)
-    c1, c2 = st.columns(2)
-    c1.metric("Peak Hour", f"{decomp['peak_hour']}:00")
-    c2.metric("Trough Hour", f"{decomp['trough_hour']}:00")
+    for name, signal in forecast.get("signals", {}).items():
+        with st.expander(f"Signal: {name}", expanded=True):
+            source = signal.get("source", "unknown")
+            st.caption(f"Source: {source}")
+            # Display signal-specific data
+            if name == "weather" and signal.get("data"):
+                w = signal["data"]
+                st.markdown(f"**{w.get('temp_f', '?')}°F** — {w.get('description', '?')}")
+            elif name == "trends" and signal.get("data"):
+                for kw, score in signal["data"].items():
+                    st.markdown(f"• `{kw}`: {score}")
+            elif name == "unc_events":
+                st.markdown(f"**{signal.get('count', 0)} events** this week")
+                for ev in (signal.get("upcoming") or [])[:3]:
+                    st.markdown(f"• {ev.get('title', '')}")
+            elif name == "reddit":
+                st.markdown(f"Avg post score: {signal.get('avg_post_score', 'N/A')}")
+                for topic in (signal.get("recent_topics") or [])[:3]:
+                    st.markdown(f"• {topic}")
+            elif name == "transit":
+                st.markdown(f"**{signal.get('stops_nearby', 0)} transit stops** nearby")
 
     st.markdown("---")
 
-    # Event simulation
-    st.markdown("### ⚡ Event Impact Simulator")
-    event_type = st.selectbox(
-        "Simulate event", list(EVENT_ANOMALIES.keys()),
-    )
-    event_hour = st.slider("Event start hour", 0, 23, 19)
+    # Recommendations
+    st.markdown("### 🎯 Recommendations")
+    for rec in forecast.get("recommendation", []):
+        st.info(rec)
 
-    sim = simulate_event_impact(event_type, event_hour, selected_dow)
+    st.markdown("---")
+
+    # Event impact models
+    st.markdown("### ⚡ Event Impact Models")
+    st.caption("Multipliers from published urban planning research")
+    event_types = [
+        "basketball_home_game", "basketball_win_rush",
+        "football_home_game", "exam_period", "severe_weather",
+    ]
+    event_type = st.selectbox("Event type", event_types)
+    sim = simulate_event_impact(event_type)
     if "error" not in sim:
-        sim_df = pd.DataFrame({
-            "Hour": list(range(24)),
-            "Baseline": sim["baseline"],
-            "With Event": sim["modified"],
-        })
-        st.line_chart(sim_df, x="Hour",
-                      y=["Baseline", "With Event"],
-                      height=300)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Multiplier", f"{sim['multiplier']}x")
-        c2.metric("Peak (With Event)", f"{sim['peak_modified']:,}")
-        c3.metric("Additional Pedestrians", f"+{sim['total_additional_pedestrians']:,}")
+        c1, c2 = st.columns(2)
+        c1.metric("Traffic Multiplier", f"{sim['multiplier']}x")
+        c2.metric("Range", f"{sim['range'][0]}x — {sim['range'][1]}x")
+        st.markdown(f"**Source:** {sim['source']}")
+        st.markdown(f"**Note:** {sim['note']}")
+        st.caption(sim["disclaimer"])
 
 
 # ═══════════════════════════════════════════════════════════════

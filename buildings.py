@@ -180,36 +180,8 @@ def _centroid(polygon):
 
 
 def _fallback_buildings():
-    """Fallback building data for key Franklin Street structures."""
-    return [
-        {
-            "id": 1, "name": "Bandidos",
-            "building_type": "commercial", "height_m": 10, "levels": 2,
-            "polygon": [
-                [35.91325, -79.05590], [35.91325, -79.05570],
-                [35.91315, -79.05570], [35.91315, -79.05590],
-            ],
-            "centroid": [35.9132, -79.0558],
-        },
-        {
-            "id": 2, "name": "Top of the Hill",
-            "building_type": "commercial", "height_m": 14, "levels": 3,
-            "polygon": [
-                [35.91310, -79.05640], [35.91310, -79.05600],
-                [35.91290, -79.05600], [35.91290, -79.05640],
-            ],
-            "centroid": [35.9130, -79.0562],
-        },
-        {
-            "id": 3, "name": "University Square",
-            "building_type": "commercial", "height_m": 12, "levels": 3,
-            "polygon": [
-                [35.91350, -79.05560], [35.91350, -79.05520],
-                [35.91330, -79.05520], [35.91330, -79.05560],
-            ],
-            "centroid": [35.9134, -79.0554],
-        },
-    ]
+    """No fallback — return empty if OSM fetch fails."""
+    return []
 
 
 # ---------------------------------------------------------------------------

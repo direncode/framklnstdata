@@ -21,7 +21,7 @@ import textwrap
 from datetime import datetime
 
 from spots import get_enriched_spots, get_ranked_spots
-from trends import build_trends_report, generate_trivia_suggestions, FALLBACK_TRENDS
+from trends import build_trends_report, generate_trivia_suggestions
 from traffic import (
     aggregate_busyness,
     fetch_nearby_places,
@@ -98,28 +98,34 @@ def generate_report(
     else:
         spots = get_ranked_spots(time_of_day=time_of_day, top_n=num_spots)
 
-    # Show busyness bar chart
-    lines.append(f"  Current busyness at {hour}:00 ({time_of_day} mode):")
-    lines.append("")
+    # Show busyness bar chart (only if live data available)
+    has_live = any(spot.get("live_busyness") is not None for spot in spots)
+    if has_live:
+        lines.append(f"  Live busyness at {hour}:00 (Google Places API):")
+        lines.append("")
+        for spot in spots:
+            busyness = spot.get("live_busyness")
+            if busyness is not None:
+                name = spot["name"][:35].ljust(35)
+                bar = _bar(busyness, 100, 20)
+                lines.append(f"  {name} {bar} {busyness:3d}%")
+        lines.append("")
+    else:
+        lines.append("  Live busyness: unavailable (set GOOGLE_PLACES_API_KEY)")
+        lines.append("  Using static foot_traffic scores for ranking.")
+        lines.append("")
 
-    for spot in spots:
-        busyness = spot.get("live_busyness", spot["foot_traffic"] * 10)
-        name = spot["name"][:35].ljust(35)
-        bar = _bar(busyness, 100, 20)
-        lines.append(f"  {name} {bar} {busyness:3d}%")
-
-    lines.append("")
-
-    # 24-hour sparklines
-    has_hourly = any("hourly_profile" in s for s in spots)
+    # 24-hour sparklines (only if live data available)
+    has_hourly = any(spot.get("hourly_profile") is not None for spot in spots)
     if has_hourly:
         lines.append("  24-hour profiles (midnight → midnight):")
         lines.append("  " + "0   4   8   12  16  20  24")
         for spot in spots[:5]:
-            hourly = spot.get("hourly_profile", [0] * 24)
-            spark = _sparkline_24h(hourly)
-            name = spot["name"][:28].ljust(28)
-            lines.append(f"  {name} {spark}")
+            hourly = spot.get("hourly_profile")
+            if hourly:
+                spark = _sparkline_24h(hourly)
+                name = spot["name"][:28].ljust(28)
+                lines.append(f"  {name} {spark}")
         lines.append("")
 
     # OSM venue discovery summary

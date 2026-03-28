@@ -150,106 +150,47 @@ def fetch_nearby_places(radius_meters=400):
 # Google Places Popular Times
 # ---------------------------------------------------------------------------
 
-# Curated fallback popular times for key Franklin Street venues
-# Format: {venue_name_fragment: {day_index: [24 hourly busyness values 0-100]}}
-# day_index: 0=Monday, 6=Sunday
-# These represent typical patterns for college-town bars/restaurants
-
-_EVENING_PEAK = [0, 0, 0, 0, 0, 0, 0, 5, 10, 15, 20, 30, 40, 35, 30, 25,
-                 30, 45, 60, 75, 85, 90, 70, 40]
-_LUNCH_PEAK = [0, 0, 0, 0, 0, 0, 0, 10, 25, 35, 40, 60, 75, 65, 45, 30,
-               25, 30, 40, 50, 55, 45, 30, 15]
-_BAR_LATE = [0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, 15, 20, 20, 15, 15,
-             20, 30, 50, 70, 85, 95, 90, 60]
-_COFFEE_MORNING = [0, 0, 0, 0, 0, 0, 10, 40, 70, 80, 65, 50, 55, 50, 40,
-                   30, 25, 20, 15, 10, 5, 0, 0, 0]
-_INTERSECTION = [0, 0, 0, 0, 0, 0, 5, 15, 35, 50, 55, 60, 65, 60, 55, 50,
-                 55, 60, 55, 45, 35, 25, 15, 5]
-
-# Weekend modifier: bars are busier on Thu-Sat
-_WEEKEND_BOOST = 1.3
-_WEEKDAY_NORMAL = 1.0
-
-FALLBACK_POPULAR_TIMES = {
-    "bandidos": {"pattern": _EVENING_PEAK, "type": "restaurant"},
-    "topo": {"pattern": _EVENING_PEAK, "type": "bar"},
-    "top of the hill": {"pattern": _EVENING_PEAK, "type": "bar"},
-    "he's not here": {"pattern": _BAR_LATE, "type": "bar"},
-    "linda's": {"pattern": _BAR_LATE, "type": "bar"},
-    "carolina coffee": {"pattern": _COFFEE_MORNING, "type": "cafe"},
-    "sutton": {"pattern": _LUNCH_PEAK, "type": "restaurant"},
-    "alpine": {"pattern": _COFFEE_MORNING, "type": "cafe"},
-    "varsity": {"pattern": _EVENING_PEAK, "type": "entertainment"},
-    "target": {"pattern": _LUNCH_PEAK, "type": "retail"},
-}
-
-
-def _match_fallback_pattern(name):
-    """Find the best matching fallback pattern for a venue name."""
-    name_lower = name.lower()
-    for key, data in FALLBACK_POPULAR_TIMES.items():
-        if key in name_lower:
-            return data["pattern"]
-    # Default pattern based on common amenity type
-    return _EVENING_PEAK
-
-
-def _get_day_modifier(day_of_week):
-    """Get busyness modifier based on day of week (0=Mon, 6=Sun)."""
-    # Thu=3, Fri=4, Sat=5 are busier
-    if day_of_week in (3, 4, 5):
-        return _WEEKEND_BOOST
-    return _WEEKDAY_NORMAL
-
-
 def fetch_popular_times(place_name, place_id=None):
     """
-    Get hourly busyness data for a venue.
-
-    If GOOGLE_PLACES_API_KEY is set and populartimes is installed,
-    fetches real data. Otherwise uses curated fallback patterns.
-
-    Returns a list of 24 busyness values (0-100) for today,
-    or None on complete failure.
+    Get hourly busyness data for a venue via Google Places API.
+    Requires GOOGLE_PLACES_API_KEY env var and populartimes library.
+    Returns a list of 24 busyness values (0-100) or None.
     """
-    # Try live data first
-    if GOOGLE_PLACES_API_KEY and place_id:
-        cache_key = _cache_key("popular_times", place_id)
-        if _is_cache_valid(cache_key, CACHE_TTL["popular_times"]):
-            cached = _read_cache(cache_key)
-            if cached:
-                return cached
+    if not GOOGLE_PLACES_API_KEY or not place_id:
+        return None
 
-        try:
-            import populartimes
-            result = populartimes.get_id(GOOGLE_PLACES_API_KEY, place_id)
-            if result and "populartimes" in result:
-                # populartimes returns data per day-of-week
-                today = datetime.now().weekday()
-                for day_data in result["populartimes"]:
-                    if day_data["name"].lower() == [
-                        "monday", "tuesday", "wednesday", "thursday",
-                        "friday", "saturday", "sunday"
-                    ][today].lower():
-                        hourly = day_data["data"]
-                        _write_cache(cache_key, hourly)
-                        return hourly
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"  [!] Popular times API error for {place_name}: {e}")
+    cache_key = _cache_key("popular_times", place_id)
+    if _is_cache_valid(cache_key, CACHE_TTL["popular_times"]):
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
 
-    # Fallback to curated patterns
-    pattern = _match_fallback_pattern(place_name)
-    today = datetime.now().weekday()
-    modifier = _get_day_modifier(today)
-    return [min(100, int(v * modifier)) for v in pattern]
+    try:
+        import populartimes
+        result = populartimes.get_id(GOOGLE_PLACES_API_KEY, place_id)
+        if result and "populartimes" in result:
+            today = datetime.now().weekday()
+            day_names = [
+                "monday", "tuesday", "wednesday", "thursday",
+                "friday", "saturday", "sunday",
+            ]
+            for day_data in result["populartimes"]:
+                if day_data["name"].lower() == day_names[today]:
+                    hourly = day_data["data"]
+                    _write_cache(cache_key, hourly)
+                    return hourly
+    except ImportError:
+        print("  [!] populartimes not installed. Run: pip install populartimes")
+    except Exception as e:
+        print(f"  [!] Popular times API error for {place_name}: {e}")
+
+    return None
 
 
 def get_current_busyness(place_name, place_id=None, hour=None):
     """
     Get the busyness score (0-100) for a venue at a specific hour.
-    If hour is None, uses the current hour.
+    Returns None if no live data available.
     """
     if hour is None:
         hour = datetime.now().hour
@@ -257,7 +198,7 @@ def get_current_busyness(place_name, place_id=None, hour=None):
     hourly = fetch_popular_times(place_name, place_id)
     if hourly and 0 <= hour < 24:
         return hourly[hour]
-    return 0
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -314,20 +255,51 @@ def fetch_chapel_hill_gis():
 # NCDOT Traffic Data
 # ---------------------------------------------------------------------------
 
-# NCDOT AADT (Annual Average Daily Traffic) for roads near Franklin Street
-# Source: NCDOT Traffic Volume Maps - these are public record
-NCDOT_AADT_DATA = {
-    "Franklin St (E of Columbia)": {"aadt": 12500, "year": 2023},
-    "Franklin St (W of Columbia)": {"aadt": 14200, "year": 2023},
-    "Columbia St (N of Franklin)": {"aadt": 8900, "year": 2023},
-    "Columbia St (S of Franklin)": {"aadt": 10100, "year": 2023},
-    "S Estes Dr (near University Place)": {"aadt": 15800, "year": 2023},
-}
-
-
 def get_ncdot_traffic():
-    """Return NCDOT AADT data for roads near Franklin Street."""
-    return NCDOT_AADT_DATA
+    """
+    Fetch NCDOT AADT data from their ArcGIS REST service.
+    Returns dict of road segments with traffic counts, or None.
+    """
+    cache_key = _cache_key("ncdot_aadt")
+    if _is_cache_valid(cache_key, 720):  # 30 day cache
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
+
+    bounds = FRANKLIN_STREET_BOUNDS
+    bbox = f"{bounds['west']},{bounds['south']},{bounds['east']},{bounds['north']}"
+
+    url = (
+        "https://services.ncdot.gov/arcgis/rest/services/"
+        "NCDOT_AADT/MapServer/0/query"
+        f"?geometry={bbox}"
+        f"&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326"
+        f"&outFields=ROUTE,AADT,AADT_YEAR,ROAD_NAME"
+        f"&where=1%3D1&f=json"
+    )
+
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = {}
+        for feature in data.get("features", []):
+            attrs = feature.get("attributes", {})
+            name = attrs.get("ROAD_NAME", attrs.get("ROUTE", "Unknown"))
+            aadt = attrs.get("AADT")
+            year = attrs.get("AADT_YEAR")
+            if name and aadt:
+                results[name] = {"aadt": int(aadt), "year": int(year) if year else None}
+
+        if results:
+            _write_cache(cache_key, results)
+            print(f"  [+] NCDOT: {len(results)} road segments with AADT data")
+            return results
+    except Exception as e:
+        print(f"  [!] NCDOT AADT error: {e}")
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -351,37 +323,35 @@ def build_heatmap_data(spots, hour=None, day_of_week=None):
 
     heatmap_points = []
 
-    # 1. Add actual venue points with their busyness
+    # 1. Add venue points with live busyness (if available)
     spot_busyness = {}
+    has_live_data = False
     for spot in spots:
         busyness = get_current_busyness(
             spot["name"],
             spot.get("place_id"),
             hour=hour,
         )
-        # Apply day-of-week modifier
-        modifier = _get_day_modifier(day_of_week)
-        busyness = min(100, int(busyness * modifier))
+        if busyness is not None:
+            has_live_data = True
+            spot_busyness[spot["name"]] = busyness
+            weight = busyness / 100.0
+            if weight > 0:
+                heatmap_points.append([spot["lat"], spot["lon"], weight])
+        else:
+            # Use static foot_traffic score as weight proxy (from spots.py)
+            ft = spot.get("foot_traffic", 5)
+            spot_busyness[spot["name"]] = ft * 10
+            heatmap_points.append([spot["lat"], spot["lon"], ft / 10.0])
 
-        spot_busyness[spot["name"]] = busyness
-
-        # Add the spot itself
-        weight = busyness / 100.0
-        if weight > 0:
-            heatmap_points.append([spot["lat"], spot["lon"], weight])
-
-    # 2. Add discovered OSM venues with estimated busyness
+    # 2. Add discovered OSM venues as points (uniform weight — no fake busyness)
     try:
         osm_places = fetch_nearby_places()
         for place in osm_places:
-            busyness = get_current_busyness(place["name"], hour=hour)
-            modifier = _get_day_modifier(day_of_week)
-            busyness = min(100, int(busyness * modifier))
-            weight = busyness / 100.0
-            if weight > 0.05:  # Skip nearly-zero points
-                heatmap_points.append([place["lat"], place["lon"], weight * 0.7])
+            # OSM venues get a base weight — we know they exist, not how busy
+            heatmap_points.append([place["lat"], place["lon"], 0.3])
     except Exception:
-        pass  # OSM data is supplementary
+        pass
 
     # 3. Interpolate along the Franklin Street spine for continuity
     if len(heatmap_points) >= 2:
@@ -424,13 +394,13 @@ def _interpolate_spine(heatmap_points, spots, spot_busyness):
 def _nearest_spot_busyness(lat, lon, spots, spot_busyness):
     """Find the busyness of the nearest known spot to a given point."""
     best_dist = float("inf")
-    best_busyness = 30  # Default ambient foot traffic
+    best_busyness = 0
 
     for spot in spots:
         dist = abs(spot["lat"] - lat) + abs(spot["lon"] - lon)
         if dist < best_dist:
             best_dist = dist
-            best_busyness = spot_busyness.get(spot["name"], 30)
+            best_busyness = spot_busyness.get(spot["name"], 0)
 
     return best_busyness
 
@@ -449,11 +419,11 @@ def aggregate_busyness(spots, hour=None):
         hour = datetime.now().hour
 
     for spot in spots:
-        # Get full 24-hour profile
+        # Get full 24-hour profile (None if no API key)
         hourly = fetch_popular_times(spot["name"], spot.get("place_id"))
-        spot["hourly_profile"] = hourly or [0] * 24
+        spot["hourly_profile"] = hourly  # None if unavailable
 
-        # Get current busyness
+        # Get current busyness (None if no API key)
         spot["live_busyness"] = get_current_busyness(
             spot["name"], spot.get("place_id"), hour=hour
         )
