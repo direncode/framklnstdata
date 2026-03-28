@@ -1,25 +1,26 @@
 """
 ==============================================
   FRANKLIN STREET DATA
-  Venue Discovery & Ranking
+  Venue Discovery & Live Foot Traffic
 ==============================================
-Every venue on Franklin Street, discovered live from OpenStreetMap
-and enriched with real-time foot traffic from BestTime.app.
+Step 1: BestTime Venue Search — discovers and forecasts all venues
+        in the Franklin Street area in ONE API call.
+Step 2: BestTime Venue Filter — queries the forecasted venues for
+        busyness at a specific day/hour.
 
-Ranking signal: BestTime.app live busyness (0-100%).
-This is ACTUAL foot traffic data from anonymous phone signals,
-not review counts or editorial guesses.
+This replaces the old approach of forecasting 53 venues individually
+(which burned 53 API credits per page load).
 """
 
-import math
 import os
 import json
-import time
+import math
+import time as time_module
 from datetime import datetime, timedelta
 
 import requests
 
-from config import CACHE_DIR, FRANKLIN_STREET_CENTER
+from config import CACHE_DIR, FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS
 from traffic import fetch_nearby_places
 
 BESTTIME_PRIVATE_KEY = os.environ.get("BESTTIME_API_KEY_PRIVATE", "")
@@ -58,126 +59,107 @@ def _write_cache(key, data):
 
 
 # ---------------------------------------------------------------------------
-# BestTime.app API — Real Foot Traffic
+# Step 1: BestTime Venue Search (one call, discovers + forecasts area)
 # ---------------------------------------------------------------------------
 
-def besttime_forecast(venue_name, venue_address="Franklin Street, Chapel Hill, NC"):
+def besttime_venue_search():
     """
-    Create a new foot traffic forecast for a venue via BestTime.app.
-    Returns venue_id + full week forecast with hourly busyness (0-100%).
-    Uses private key. Costs 1 forecast credit.
-    Cache for 7 days (forecasts are based on weekly averages).
+    Search for all venues near Franklin Street via BestTime.
+    This triggers forecasts for all found venues in one batch.
+    Results are cached for 7 days (forecasts represent weekly averages).
+
+    Returns the search job URL or cached venue data.
     """
     if not BESTTIME_PRIVATE_KEY:
         return None
 
-    cache_key = f"besttime_forecast_{venue_name.replace(' ', '_')[:30]}"
-    cached = _read_cache(cache_key, max_age_hours=168)  # 7 days
+    cached = _read_cache("besttime_search", max_age_hours=168)
     if cached:
+        print(f"  [+] BestTime: using cached search ({len(cached)} venues)")
         return cached
 
+    lat, lon = FRANKLIN_STREET_CENTER
+
+    # Initiate venue search for the Franklin Street area
     try:
         resp = requests.post(
-            f"{BESTTIME_BASE}/forecasts",
+            f"{BESTTIME_BASE}/venues/search",
             params={
                 "api_key_private": BESTTIME_PRIVATE_KEY,
-                "venue_name": venue_name,
-                "venue_address": venue_address,
+                "q": "bars restaurants cafes Chapel Hill Franklin Street NC",
+                "num": 50,
+                "lat": lat,
+                "lng": lon,
+                "radius": 500,
             },
             timeout=30,
         )
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("status") == "OK":
-                result = {
-                    "venue_id": data.get("venue_info", {}).get("venue_id"),
-                    "venue_name": data.get("venue_info", {}).get("venue_name"),
-                    "analysis": [],
-                }
-
-                # Extract day_raw (24 hourly values 0-100) for each day
-                for day in data.get("analysis", []):
-                    day_info = day.get("day_info", {})
-                    result["analysis"].append({
-                        "day_text": day_info.get("day_text", ""),
-                        "day_int": day_info.get("day_int", 0),
-                        "day_raw": day.get("day_raw", []),
-                        "venue_open": day_info.get("venue_open", 0),
-                        "venue_closed": day_info.get("venue_closed", 0),
-                    })
-
-                _write_cache(cache_key, result)
-                print(f"  [+] BestTime forecast: {venue_name}")
-                return result
-            else:
-                print(f"  [!] BestTime forecast failed for {venue_name}: {data.get('message', '')}")
+            job_id = data.get("job_id")
+            if job_id:
+                print(f"  [+] BestTime search started, job_id={job_id}")
+                # Poll for completion
+                return _poll_search_job(job_id)
+            elif data.get("venues"):
+                # Sometimes returns venues directly
+                venues = data["venues"]
+                _write_cache("besttime_search", venues)
+                return venues
         else:
-            print(f"  [!] BestTime HTTP {resp.status_code} for {venue_name}")
-
-        time.sleep(0.5)  # Rate limit: 300/min
-
+            print(f"  [!] BestTime search HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
-        print(f"  [!] BestTime error for {venue_name}: {e}")
+        print(f"  [!] BestTime search error: {e}")
 
     return None
 
 
-def besttime_now(venue_name, venue_address="Franklin Street, Chapel Hill, NC"):
-    """
-    Get LIVE busyness for a venue right now via BestTime.app.
-    Returns current busyness (0-100%) and forecasted busyness.
-    Uses private key. Costs 1 live credit.
-    Cache for 1 hour.
-    """
-    if not BESTTIME_PRIVATE_KEY:
-        return None
+def _poll_search_job(job_id, max_wait=60):
+    """Poll BestTime search job until complete."""
+    start = time_module.time()
+    while time_module.time() - start < max_wait:
+        try:
+            resp = requests.get(
+                f"{BESTTIME_BASE}/venues/progress",
+                params={
+                    "api_key_private": BESTTIME_PRIVATE_KEY,
+                    "job_id": job_id,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                status = data.get("status")
+                if status == "OK":
+                    venues = data.get("venues", [])
+                    if venues:
+                        _write_cache("besttime_search", venues)
+                        print(f"  [+] BestTime search complete: {len(venues)} venues")
+                        return venues
+                elif status == "error":
+                    print(f"  [!] BestTime search failed: {data.get('message')}")
+                    return None
+                # Still processing
+        except Exception:
+            pass
+        time_module.sleep(3)
 
-    cache_key = f"besttime_now_{venue_name.replace(' ', '_')[:30]}"
-    cached = _read_cache(cache_key, max_age_hours=1)
-    if cached:
-        return cached
-
-    try:
-        resp = requests.post(
-            f"{BESTTIME_BASE}/forecasts/live",
-            params={
-                "api_key_private": BESTTIME_PRIVATE_KEY,
-                "venue_name": venue_name,
-                "venue_address": venue_address,
-            },
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("status") == "OK":
-                analysis = data.get("analysis", {})
-                result = {
-                    "venue_name": data.get("venue_info", {}).get("venue_name"),
-                    "venue_id": data.get("venue_info", {}).get("venue_id"),
-                    "live_busyness": analysis.get("venue_live_busyness"),
-                    "forecasted_busyness": analysis.get("venue_forecasted_busyness"),
-                    "live_vs_forecast": analysis.get("venue_live_forecasted_delta"),
-                    "hour": analysis.get("hour_start"),
-                    "source": "besttime_live",
-                }
-                _write_cache(cache_key, result)
-                print(f"  [+] BestTime live: {venue_name} = {result['live_busyness']}%")
-                return result
-
-        time.sleep(0.5)
-
-    except Exception as e:
-        print(f"  [!] BestTime live error for {venue_name}: {e}")
-
+    print("  [!] BestTime search timed out")
     return None
 
 
-def besttime_get_busyness_for_hour(forecast, hour=None, day_of_week=None):
+# ---------------------------------------------------------------------------
+# Step 2: BestTime Venue Filter (query busyness for day/hour)
+# ---------------------------------------------------------------------------
+
+def besttime_venue_filter(hour=None, day_of_week=None):
     """
-    Extract busyness for a specific hour from a BestTime forecast.
-    Returns 0-100 or None.
+    Filter all forecasted venues for busyness at a specific day/hour.
+    Uses the public key (no credit cost for filtering).
+
+    Returns list of venues with busyness data.
     """
-    if not forecast or not forecast.get("analysis"):
+    if not BESTTIME_PUBLIC_KEY:
         return None
 
     if hour is None:
@@ -185,101 +167,176 @@ def besttime_get_busyness_for_hour(forecast, hour=None, day_of_week=None):
     if day_of_week is None:
         day_of_week = datetime.now().weekday()
 
-    for day in forecast["analysis"]:
-        if day.get("day_int") == day_of_week:
-            raw = day.get("day_raw", [])
-            # BestTime day_raw starts at 6am by default
-            # Index 0 = 6am, index 1 = 7am, ... index 18 = midnight
-            bt_index = (hour - 6) % 24
-            if 0 <= bt_index < len(raw):
-                return raw[bt_index]
+    cache_key = f"besttime_filter_{day_of_week}_{hour}"
+    cached = _read_cache(cache_key, max_age_hours=1)
+    if cached:
+        return cached
+
+    lat, lon = FRANKLIN_STREET_CENTER
+    bounds = FRANKLIN_STREET_BOUNDS
+
+    try:
+        resp = requests.get(
+            f"{BESTTIME_BASE}/venues/filter",
+            params={
+                "api_key_public": BESTTIME_PUBLIC_KEY,
+                "lat": lat,
+                "lng": lon,
+                "radius": 500,
+                "day_int": day_of_week,
+                "hour": hour,
+                "types": "BAR,RESTAURANT,CAFE,CLUB,PUB,NIGHT_CLUB",
+                "order_by": "day_rank_max",
+                "order": "desc",
+                "foot_traffic": "true",
+                "limit": 100,
+            },
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            venues = data.get("venues", [])
+            if venues:
+                result = []
+                for v in venues:
+                    info = v.get("venue_info", {})
+                    forecast = v.get("venue_foot_traffic_forecast", {})
+
+                    # Get busyness for this hour from day_raw
+                    busyness = None
+                    day_raw = forecast.get("day_raw")
+                    if day_raw and isinstance(day_raw, list):
+                        # BestTime day_raw: index 0 = 6am, wraps at 24
+                        bt_index = (hour - 6) % 24
+                        if 0 <= bt_index < len(day_raw):
+                            busyness = day_raw[bt_index]
+
+                    result.append({
+                        "name": info.get("venue_name", ""),
+                        "lat": info.get("venue_lat"),
+                        "lon": info.get("venue_lng"),
+                        "venue_id": info.get("venue_id"),
+                        "venue_type": info.get("venue_type", ""),
+                        "busyness": busyness,
+                        "hourly_profile": day_raw,
+                        "busyness_source": "besttime_forecast",
+                    })
+
+                _write_cache(cache_key, result)
+                print(f"  [+] BestTime filter: {len(result)} venues at hour {hour}")
+                return result
+            else:
+                print(f"  [!] BestTime filter: no venues returned")
+        else:
+            print(f"  [!] BestTime filter HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"  [!] BestTime filter error: {e}")
 
     return None
-
-
-# ---------------------------------------------------------------------------
-# OSM Discovery
-# ---------------------------------------------------------------------------
-
-def discover_venues(radius_meters=500):
-    """Discover all venues on/near Franklin Street via OpenStreetMap."""
-    places = fetch_nearby_places(radius_meters=radius_meters)
-    if not places:
-        return []
-
-    return [
-        {
-            "id": i + 1,
-            "name": place["name"],
-            "lat": place["lat"],
-            "lon": place["lon"],
-            "amenity_type": place.get("amenity_type", "unknown"),
-            "osm_id": place.get("osm_id"),
-        }
-        for i, place in enumerate(places)
-    ]
 
 
 # ---------------------------------------------------------------------------
 # Combined: OSM Discovery + BestTime Busyness
 # ---------------------------------------------------------------------------
 
+def _haversine(lat1, lon1, lat2, lon2):
+    R = 6371000
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat/2)**2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlon/2)**2)
+    return R * 2 * math.asin(math.sqrt(a))
+
+
 def get_venues_with_busyness(hour=None, radius_meters=500):
     """
-    Discover venues via OSM, enrich with BestTime.app foot traffic.
+    Get all Franklin Street venues with real foot traffic data.
 
-    1. OSM Overpass → all venues with coordinates
-    2. BestTime.app forecast → hourly busyness 0-100% for each venue
-    3. Rank by busyness at the requested hour
+    Strategy:
+    1. Trigger BestTime venue search (once, cached 7 days)
+    2. Query BestTime venue filter for busyness at requested hour
+    3. Also discover OSM venues and merge (OSM has more coverage)
+    4. Match BestTime venues to OSM venues by proximity
 
-    If no BestTime API key, venues appear but with no busyness data.
+    If no BestTime keys, falls back to OSM-only (no busyness).
     """
-    venues = discover_venues(radius_meters=radius_meters)
-    if not venues:
-        return []
-
-    if not BESTTIME_PRIVATE_KEY:
-        for venue in venues:
-            venue["busyness"] = None
-            venue["hourly_profile"] = None
-            venue["busyness_source"] = None
-        return venues
-
     if hour is None:
         hour = datetime.now().hour
     day_of_week = datetime.now().weekday()
 
-    for venue in venues:
-        # Get forecast for this venue
-        forecast = besttime_forecast(
-            venue["name"],
-            f"{venue['name']}, Franklin Street, Chapel Hill, NC",
-        )
+    # Get OSM venues (always available, no API key needed)
+    osm_venues = fetch_nearby_places(radius_meters=radius_meters)
+    if not osm_venues:
+        osm_venues = []
 
-        if forecast:
-            # Extract busyness for the requested hour
-            busyness = besttime_get_busyness_for_hour(
-                forecast, hour=hour, day_of_week=day_of_week,
-            )
-            venue["busyness"] = busyness
-            venue["venue_id"] = forecast.get("venue_id")
-            venue["busyness_source"] = "besttime_forecast"
+    venues = []
+    for i, place in enumerate(osm_venues):
+        venues.append({
+            "id": i + 1,
+            "name": place["name"],
+            "lat": place["lat"],
+            "lon": place["lon"],
+            "amenity_type": place.get("amenity_type", "unknown"),
+            "busyness": None,
+            "hourly_profile": None,
+            "busyness_source": None,
+        })
 
-            # Extract today's full hourly profile
-            for day in forecast.get("analysis", []):
-                if day.get("day_int") == day_of_week:
-                    venue["hourly_profile"] = day.get("day_raw")
-                    break
-            else:
-                venue["hourly_profile"] = None
-        else:
-            venue["busyness"] = None
-            venue["hourly_profile"] = None
-            venue["busyness_source"] = None
+    if not BESTTIME_PRIVATE_KEY and not BESTTIME_PUBLIC_KEY:
+        return venues
 
-    # Sort: highest busyness first
-    with_data = [v for v in venues if v["busyness"] is not None]
-    without_data = [v for v in venues if v["busyness"] is None]
+    # Step 1: Ensure venues are forecasted (one-time, cached 7 days)
+    besttime_venue_search()
+
+    # Step 2: Filter for busyness at requested hour
+    bt_venues = besttime_venue_filter(hour=hour, day_of_week=day_of_week)
+
+    if bt_venues:
+        # Match BestTime venues to OSM venues by proximity
+        for venue in venues:
+            best_match = None
+            best_dist = 80  # meters threshold
+
+            for bt in bt_venues:
+                if bt.get("lat") and bt.get("lon"):
+                    dist = _haversine(
+                        venue["lat"], venue["lon"],
+                        bt["lat"], bt["lon"],
+                    )
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_match = bt
+
+            if best_match:
+                venue["busyness"] = best_match.get("busyness")
+                venue["hourly_profile"] = best_match.get("hourly_profile")
+                venue["busyness_source"] = "besttime_forecast"
+                venue["venue_id"] = best_match.get("venue_id")
+
+        # Also add BestTime venues that weren't in OSM
+        osm_coords = set((v["lat"], v["lon"]) for v in venues)
+        for bt in bt_venues:
+            if bt.get("lat") and bt.get("lon"):
+                is_new = all(
+                    _haversine(bt["lat"], bt["lon"], lat, lon) > 80
+                    for lat, lon in osm_coords
+                )
+                if is_new:
+                    venues.append({
+                        "id": len(venues) + 1,
+                        "name": bt["name"],
+                        "lat": bt["lat"],
+                        "lon": bt["lon"],
+                        "amenity_type": bt.get("venue_type", "unknown"),
+                        "busyness": bt.get("busyness"),
+                        "hourly_profile": bt.get("hourly_profile"),
+                        "busyness_source": "besttime_forecast",
+                    })
+
+    # Sort: busyness desc, then alphabetical
+    with_data = [v for v in venues if v.get("busyness") is not None and v["busyness"] > 0]
+    without_data = [v for v in venues if not (v.get("busyness") is not None and v["busyness"] > 0)]
 
     with_data.sort(key=lambda v: v["busyness"], reverse=True)
     without_data.sort(key=lambda v: v["name"])
@@ -292,16 +349,13 @@ def get_venues_with_busyness(hour=None, radius_meters=500):
 # ---------------------------------------------------------------------------
 
 def get_enriched_spots(time_of_day="evening", hour=None, top_n=50):
-    """Get venues ranked by foot traffic."""
     venues = get_venues_with_busyness(hour=hour)
-
     for v in venues:
-        if v["busyness"] is not None:
+        if v.get("busyness") is not None and v["busyness"] > 0:
             v["composite_score"] = round(v["busyness"] / 10, 1)
         else:
             v["composite_score"] = 0
-        v["live_busyness"] = v["busyness"]
-
+        v["live_busyness"] = v.get("busyness")
     return venues[:top_n]
 
 
