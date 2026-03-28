@@ -40,15 +40,13 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-from config import FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS
+from config import FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS, DEFAULT_GEO
 from spots import get_enriched_spots, discover_venues
 from traffic import (
     build_heatmap_data,
     fetch_nearby_places,
     get_ncdot_traffic,
     aggregate_busyness,
-    get_current_busyness,
-    fetch_popular_times,
 )
 from trends import (
     build_trends_report,
@@ -328,10 +326,12 @@ def handle_trends(params):
     else:
         trends_report = None
 
-    suggestions, using_fallback = generate_trivia_suggestions(trends_report)
+    suggestions, has_data = generate_trivia_suggestions(trends_report)
 
     return {
-        "using_fallback": using_fallback,
+        "has_data": has_data,
+        "geo": trends_report.get("geo", DEFAULT_GEO) if trends_report else DEFAULT_GEO,
+        "geo_description": trends_report.get("geo_description", "") if trends_report else "",
         "suggestions": [
             {
                 "category": s["category"],
@@ -340,6 +340,8 @@ def handle_trends(params):
                 "strength": s["strength"],
                 "suggestion": s["suggestion"],
                 "rising_queries": s.get("related_rising", []),
+                "rising_topics": s.get("rising_topics", []),
+                "top_cities": s.get("top_cities", []),
             }
             for s in suggestions
         ],
@@ -348,6 +350,9 @@ def handle_trends(params):
         ),
         "locally_relevant": (
             trends_report.get("locally_relevant", []) if trends_report else []
+        ),
+        "interest_by_city": (
+            trends_report.get("interest_by_city", {}) if trends_report else {}
         ),
         "timestamp": datetime.now().isoformat(),
     }

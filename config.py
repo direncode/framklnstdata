@@ -72,7 +72,7 @@ CACHE_TTL = {
 # Google Trends Configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_GEO = "US-NC"
+DEFAULT_GEO = "US-NC-560"  # DMA 560 = Raleigh-Durham-Fayetteville (includes Chapel Hill)
 DEFAULT_TIMEFRAME = "now 7-d"
 TRENDS_TIMEZONE = 300  # EST
 

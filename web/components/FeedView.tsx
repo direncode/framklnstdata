@@ -170,7 +170,7 @@ export default function FeedView({
           {trending && trending.length > 0 && (
             <section>
               <h2 className="text-[10px] font-mono tracking-[0.2em] text-[#00d4aa] uppercase mb-3">
-                Trending in NC
+                Trending in Triangle NC (DMA 560)
               </h2>
               <div className="flex flex-wrap gap-1.5">
                 {trending.map((t, i) => (
