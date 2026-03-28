@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════
+   FRANKLIN STREET PANOPTICON — Palantir Design System
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  --background: #0a0b0f;
+  --foreground: #e2e4e9;
+  --surface: #111318;
+  --surface-hover: #1a1c24;
+  --border: #1e2028;
+  --border-bright: #2a2d38;
+  --accent: #00d4aa;
+  --accent-dim: #00d4aa33;
+  --accent-blue: #4a9eff;
+  --accent-blue-dim: #4a9eff22;
+  --danger: #ff4d6a;
+  --warning: #ffaa00;
+  --text-secondary: #6b7080;
+  --text-tertiary: #454a58;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2d38 transparent;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Palantir-style glow effects */
+.glow-green {
+  box-shadow: 0 0 20px #00d4aa15, 0 0 60px #00d4aa08;
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px #4a9eff15, 0 0 60px #4a9eff08;
+}
+
+.glow-line {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  height: 1px;
+}
+
+/* Status indicators */
+.status-live {
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Data grid lines */
+.grid-overlay {
+  background-image:
+    linear-gradient(rgba(30, 32, 40, 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 32, 40, 0.5) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Map container */
+.map-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* Metric cards */
+.metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  transition: border-color 0.2s;
+}
+
+.metric-card:hover {
+  border-color: var(--border-bright);
+}
+
+/* Feed items */
+.feed-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  transition: all 0.15s;
+}
+
+.feed-item:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+/* Scrollable panels */
+.panel-scroll {
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+}
+
+/* MapLibre overrides */
+.maplibregl-map {
+  font-family: inherit;
+}
