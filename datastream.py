@@ -41,7 +41,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from config import FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS, DEFAULT_GEO
-from spots import get_enriched_spots, discover_venues
+from spots import get_enriched_spots
 from traffic import (
     build_heatmap_data,
     fetch_nearby_places,
@@ -210,32 +210,18 @@ def handle_spot_detail(spot_id, params):
     hour = _parse_hour(params.get("hour", [None])[0])
 
     spots = get_enriched_spots(hour=hour, top_n=100)
-    spots = aggregate_busyness(spots, hour=hour)
-
-    spot = next((s for s in spots if s["id"] == spot_id), None)
+    spot = next((s for s in spots if s.get("id") == spot_id), None)
     if not spot:
-        return {"error": f"Spot ID {spot_id} not found", "valid_ids": list(range(1, 11))}
+        return {"error": f"Spot ID {spot_id} not found"}
 
     return {
         "spot": {
-            "id": spot["id"],
             "name": spot["name"],
             "lat": spot["lat"],
             "lon": spot["lon"],
-            "address": spot["address"],
-            "place_type": spot.get("place_type"),
-            "place_id": spot.get("place_id"),
-            "live_busyness": spot.get("live_busyness"),
+            "amenity_type": spot.get("amenity_type", ""),
+            "busyness": spot.get("busyness"),
             "hourly_profile": spot.get("hourly_profile"),
-            "metrics": {
-                "foot_traffic": spot["foot_traffic"],
-                "dwell_time": spot["dwell_time"],
-                "visibility": spot["visibility"],
-                "student_density": spot["student_density"],
-            },
-            "best_times": spot["best_times"],
-            "rationale": spot["rationale"],
-            "placement_tip": spot["placement_tip"],
         },
         "timestamp": datetime.now().isoformat(),
     }
@@ -247,9 +233,6 @@ def handle_traffic(params):
     day = _parse_day(params.get("day", [None])[0])
 
     spots = get_enriched_spots(hour=hour, top_n=100)
-    spots = aggregate_busyness(spots, hour=hour)
-
-    event = get_event_context()
     ncdot = get_ncdot_traffic()
 
     return {
@@ -257,17 +240,13 @@ def handle_traffic(params):
         "venues": [
             {
                 "name": s["name"],
-                "busyness": s.get("live_busyness", 0),
+                "busyness": s.get("busyness"),
                 "hourly_profile": s.get("hourly_profile"),
                 "lat": s["lat"],
                 "lon": s["lon"],
             }
             for s in spots
         ],
-        "event_context": {
-            "type": event["event_type"],
-            "traffic_multiplier": event["traffic_multiplier"],
-        },
         "ncdot_aadt": ncdot,
         "timestamp": datetime.now().isoformat(),
     }
