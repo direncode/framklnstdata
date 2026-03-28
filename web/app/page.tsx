@@ -131,7 +131,7 @@ export default function Home() {
                     <div className="metric-card">
                       <div className="text-[9px] text-[#454a58] uppercase">Peak</div>
                       <div className="text-lg font-mono text-[#ff6600]">
-                        {Math.max(...venues.filter(v => v.busyness !== null).map(v => v.busyness!))}%
+                        {(() => { const vals = venues.filter(v => v.busyness !== null).map(v => v.busyness!); return vals.length > 0 ? Math.max(...vals) : 0; })()}%
                       </div>
                     </div>
                   )}

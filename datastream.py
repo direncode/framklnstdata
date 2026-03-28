@@ -193,24 +193,13 @@ def handle_spots(params):
         "spots": [
             {
                 "rank": i + 1,
-                "id": s["id"],
                 "name": s["name"],
                 "lat": s["lat"],
                 "lon": s["lon"],
-                "address": s["address"],
-                "place_type": s.get("place_type"),
-                "composite_score": s["composite_score"],
-                "live_busyness": s.get("live_busyness", None),
-                "hourly_profile": s.get("hourly_profile", None),
-                "metrics": {
-                    "foot_traffic": s["foot_traffic"],
-                    "dwell_time": s["dwell_time"],
-                    "visibility": s["visibility"],
-                    "student_density": s["student_density"],
-                },
-                "best_times": s["best_times"],
-                "rationale": s["rationale"],
-                "placement_tip": s["placement_tip"],
+                "amenity_type": s.get("amenity_type", ""),
+                "busyness": s.get("busyness"),
+                "composite_score": s.get("composite_score", 0),
+                "hourly_profile": s.get("hourly_profile"),
             }
             for i, s in enumerate(spots)
         ],
