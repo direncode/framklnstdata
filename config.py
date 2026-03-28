@@ -1,6 +1,6 @@
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v2 - Configuration
+  FRANKLIN STREET PANOPTICON v3 - Configuration
 ==============================================
 Centralized constants, API keys, and cache settings.
 """

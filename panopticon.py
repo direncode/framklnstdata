@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 ==============================================
-  FRANKLIN STREET PANOPTICON v2
-  Trivia Night Optimization for Bandidos
+  FRANKLIN STREET PANOPTICON v3
+  Surveillance-Grade Intelligence Platform
   UNC Chapel Hill · Franklin Street
 ==============================================
 
 Run standalone:   python panopticon.py
 Run as web app:   streamlit run app.py
+Run as API:       python datastream.py
 
 Generates a combined surveillance report with:
   1. Live foot traffic analysis + heat map data
@@ -75,7 +76,7 @@ def generate_report(
 
     lines.append("")
     lines.append("=" * 62)
-    lines.append("   ███ FRANKLIN STREET PANOPTICON v2 ███")
+    lines.append("   ███ FRANKLIN STREET PANOPTICON v3 ███")
     lines.append("   Trivia Night Surveillance Report")
     lines.append(f"   Generated: {now.strftime('%B %d, %Y at %I:%M %p')}")
     lines.append(f"   Day: {day_name} | Analysis hour: {hour}:00")

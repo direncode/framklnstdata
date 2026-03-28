@@ -4,3 +4,4 @@ streamlit>=1.28.0
 folium>=0.15.0
 streamlit-folium>=0.15.0
 populartimes>=1.0.1
+pandas>=2.0.0
