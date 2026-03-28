@@ -50,11 +50,26 @@ export default function Home() {
 
   const fetchVenues = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/venues?hour=${hour}`);
+      const res = await fetch(`${API_BASE}/spots?hour=${hour}`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setVenues(data);
+        // Backend returns {spots: [...]} or {query: ..., spots: [...]}
+        const list = data?.spots || data?.venues || (Array.isArray(data) ? data : []);
+        if (list.length > 0) {
+          setVenues(list);
+          setApiConnected(true);
+          return;
+        }
+      }
+    } catch { /* empty */ }
+    // Try /venues as fallback
+    try {
+      const res = await fetch(`${API_BASE}/venues`);
+      if (res.ok) {
+        const data = await res.json();
+        const list = data?.venues || (Array.isArray(data) ? data : []);
+        if (list.length > 0) {
+          setVenues(list);
           setApiConnected(true);
           return;
         }
