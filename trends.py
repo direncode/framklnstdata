@@ -44,9 +44,30 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     Fetch Google Trends interest-over-time at DMA level.
     geo="US-NC-560" = Raleigh-Durham DMA (includes Chapel Hill).
     Returns dict of {keyword: avg_interest_score} or None.
+    Cached for 1 hour to avoid repeated slow API calls.
     """
+    import json, os, hashlib
+    from datetime import datetime, timedelta
+
     if keywords is None:
         keywords = SEED_KEYWORDS
+
+    # File-based cache (survives restarts, 1 hour TTL)
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".franklinst_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_key = hashlib.md5(f"trends_{geo}_{','.join(sorted(keywords))}".encode()).hexdigest()
+    cache_file = os.path.join(cache_dir, f"trends_{cache_key}.json")
+
+    try:
+        if os.path.exists(cache_file):
+            mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+            if (datetime.now() - mtime) < timedelta(hours=1):
+                with open(cache_file) as f:
+                    cached = json.load(f)
+                if cached:
+                    return cached
+    except Exception:
+        pass
 
     pytrends = _get_pytrends()
     if pytrends is None:
@@ -63,11 +84,20 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
                 for kw in batch:
                     if kw in data.columns:
                         results[kw] = int(data[kw].mean())
-            time.sleep(2)
+            if i + 5 < len(keywords):
+                time.sleep(1)  # Reduced from 2s
         except Exception as e:
             print(f"  [!] Trends API error for {batch}: {e}")
-            time.sleep(5)
+            time.sleep(2)
             continue
+
+    # Cache results
+    if results:
+        try:
+            with open(cache_file, "w") as f:
+                json.dump(results, f)
+        except Exception:
+            pass
 
     return results if results else None
 

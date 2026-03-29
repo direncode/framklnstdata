@@ -762,10 +762,10 @@ def collect_signals() -> dict:
     try:
         from trends import fetch_trends
         from config import SEED_KEYWORDS, VENUE_SEARCH_KEYWORDS
-        all_kw = list(SEED_KEYWORDS[:5])
+        all_kw = list(SEED_KEYWORDS[:3])
         for vtype_kws in VENUE_SEARCH_KEYWORDS.values():
-            all_kw.extend(vtype_kws[:2])
-        all_kw = list(dict.fromkeys(all_kw))[:20]
+            all_kw.append(vtype_kws[0])  # Just top keyword per type
+        all_kw = list(dict.fromkeys(all_kw))[:10]  # 2 batches max = ~3s
         trends_scores = fetch_trends(keywords=all_kw)
         if trends_scores:
             signals["trends_interest"] = trends_scores
