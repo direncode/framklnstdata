@@ -65,7 +65,8 @@ export default function Home() {
   const [trends, setTrends] = useState<TrendsData | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [showTraffic, setShowTraffic] = useState(false);
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const [showTraffic, setShowTraffic] = useState(true);  // Default ON
   const [showSearch, setShowSearch] = useState(false);
   const [trafficHeatmap, setTrafficHeatmap] = useState<HeatmapPoint[]>([]);
   const [searchHeatmap, setSearchHeatmap] = useState<HeatmapPoint[]>([]);
