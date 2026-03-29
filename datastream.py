@@ -147,6 +147,7 @@ def handle_root():
             "/network": "Street network topology analysis",
             "/network/intersections": "Key intersections with connectivity scores",
             "/density": "BTUT density field and convergence diagnostics",
+            "/convergence": "Search trajectory → venue convergence analysis",
             "/report": "Full combined text report",
             "/export": "Complete data export (all feeds combined)",
         },
@@ -321,9 +322,10 @@ def handle_venues():
 def handle_trends(params):
     """Current trends and trivia suggestions."""
     live = params.get("live", ["false"])[0].lower() == "true"
+    area = params.get("area", [None])[0]
 
     if live:
-        trends_report = build_trends_report()
+        trends_report = build_trends_report(area=area)
     else:
         trends_report = None
 
@@ -522,6 +524,37 @@ def handle_density(params):
         return {"error": f"BTUT engine error: {str(e)}"}
 
 
+def handle_convergence(params):
+    """Search-to-venue convergence analysis.
+
+    Shows how current Google Trends search trajectories map onto
+    venue locations — predicting WHERE foot traffic will flow
+    based on what people are searching for NOW.
+    """
+    hour = _parse_hour(params.get("hour", [None])[0])
+    area = params.get("area", [None])[0]
+
+    try:
+        from trends import compute_search_convergence
+
+        venues = fetch_nearby_places()
+        result = compute_search_convergence(venues, hour=hour, area=area)
+
+        return {
+            "engine": "BTUT Search Convergence",
+            "hour": hour,
+            "area": area or "chapel_hill",
+            "venue_count": len(result.get("venue_scores", {})),
+            "venues_with_signal": sum(1 for s in result.get("venue_scores", {}).values() if s > 0),
+            "venue_scores": result.get("venue_scores", {}),
+            "top_searches": result.get("top_searches", []),
+            "heatmap": result.get("heatmap", []),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"error": f"Search convergence error: {str(e)}"}
+
+
 def handle_export(params):
     """Complete data export — all feeds combined."""
     hour = _parse_hour(params.get("hour", [None])[0])
@@ -578,6 +611,7 @@ class DataHandler(BaseHTTPRequestHandler):
             "/livefeed": handle_livefeed,
             "/forecast": lambda: handle_forecast(params),
             "/density": lambda: handle_density(params),
+            "/convergence": lambda: handle_convergence(params),
             "/report": lambda: handle_report(params),
             "/export": lambda: handle_export(params),
         }
@@ -656,6 +690,7 @@ if __name__ == "__main__":
     print("    /intel           Full OSINT briefing")
     print("    /network         Street network topology")
     print("    /density         BTUT density field + convergence")
+    print("    /convergence     Search trajectory → venue mapping")
     print("    /report          Text surveillance report")
     print("    /export          Complete data export")
     print()

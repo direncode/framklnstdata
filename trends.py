@@ -19,6 +19,9 @@ from config import (
     SEED_KEYWORDS,
     TRIVIA_CATEGORIES,
     LOCAL_RELEVANCE_KEYWORDS,
+    TREND_AREAS,
+    DEFAULT_TREND_AREA,
+    VENUE_SEARCH_KEYWORDS,
 )
 
 
@@ -217,11 +220,14 @@ def fetch_realtime_trending(cat="all", geo="US"):
 # Full Trends Report (Hyper-Local)
 # ---------------------------------------------------------------------------
 
-def build_trends_report(seed_keywords=None, geo=DEFAULT_GEO):
+def build_trends_report(seed_keywords=None, geo=DEFAULT_GEO, area=None):
     """
-    Comprehensive trends report at DMA level.
-    Everything scoped to Raleigh-Durham market (Chapel Hill).
+    Comprehensive trends report scoped to a specific area.
+    Default: Chapel Hill / Triangle NC (DMA 560).
+    Areas: chapel_hill, raleigh, charlotte, national.
     """
+    if area and area in TREND_AREAS:
+        geo = TREND_AREAS[area]["geo"]
     if seed_keywords is None:
         all_kw = []
         for kws in TRIVIA_CATEGORIES.values():
@@ -417,3 +423,122 @@ def _make_suggestion(category, keyword, strength):
     return templates.get(
         category, f'"{keyword}" is trending — consider questions in this area.'
     )
+
+
+# ---------------------------------------------------------------------------
+# Search-to-Venue Convergence Engine
+# ---------------------------------------------------------------------------
+
+def compute_search_convergence(venues, hour=None, area=None):
+    """
+    Compute search trajectory → venue convergence scores.
+
+    Maps Google Trends interest for venue-related keywords onto specific
+    venues by type affinity, time modulation, and cuisine matching.
+
+    This creates a "search convergence field" that predicts WHERE
+    foot traffic will flow based on what people are searching for NOW.
+
+    Returns:
+        {
+            "venue_scores": {venue_name: convergence_score (0-100)},
+            "top_searches": [{keyword, score, venue_type, matching_count}],
+            "heatmap": [[lat, lon, weight], ...],
+        }
+    """
+    from datetime import datetime
+    from config import MFG_VENUE_PROFILES
+
+    if hour is None:
+        hour = datetime.now().hour
+
+    geo = DEFAULT_GEO
+    if area and area in TREND_AREAS:
+        geo = TREND_AREAS[area]["geo"]
+
+    # Step 1: Build search keywords from venue type mappings
+    all_search_kw = []
+    kw_to_types = {}  # keyword -> set of venue types it maps to
+    for vtype, keywords in VENUE_SEARCH_KEYWORDS.items():
+        for kw in keywords:
+            if kw not in kw_to_types:
+                kw_to_types[kw] = set()
+                all_search_kw.append(kw)
+            kw_to_types[kw].add(vtype)
+
+    # Step 2: Fetch interest scores for venue-related search terms
+    # Use a subset to avoid API rate limits (top keywords per type)
+    search_kw_subset = []
+    for vtype, keywords in VENUE_SEARCH_KEYWORDS.items():
+        search_kw_subset.extend(keywords[:3])  # Top 3 per type
+    search_kw_subset = list(dict.fromkeys(search_kw_subset))[:25]
+
+    interest = fetch_trends(keywords=search_kw_subset, geo=geo)
+    if not interest:
+        return {"venue_scores": {}, "top_searches": [], "heatmap": []}
+
+    # Step 3: Compute per-venue-type aggregate interest
+    type_interest = {}
+    for kw, score in interest.items():
+        for vtype in kw_to_types.get(kw, set()):
+            if vtype not in type_interest:
+                type_interest[vtype] = []
+            type_interest[vtype].append(score)
+
+    type_avg = {}
+    for vtype, scores in type_interest.items():
+        type_avg[vtype] = sum(scores) / len(scores) if scores else 0
+
+    # Step 4: Time-modulate — searches for "bars" at 9pm matter more than at 9am
+    for vtype in type_avg:
+        profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES.get("restaurant"))
+        if profile:
+            time_factor = profile[hour % 24] / 100.0
+            # Blend: 60% raw interest + 40% time-weighted
+            type_avg[vtype] = type_avg[vtype] * (0.6 + 0.4 * time_factor)
+
+    # Step 5: Score each venue
+    venue_scores = {}
+    for v in venues:
+        name = v.get("name", "")
+        vtype = v.get("amenity_type", "unknown").lower()
+
+        # Direct type match
+        score = type_avg.get(vtype, 0)
+
+        # Cuisine-based bonus: if venue cuisine matches a trending keyword
+        cuisine = v.get("cuisine", "").lower()
+        if cuisine:
+            for kw, kw_score in interest.items():
+                if kw.lower() in cuisine or cuisine in kw.lower():
+                    score = max(score, kw_score * 0.8)
+
+        venue_scores[name] = min(100, max(0, int(round(score))))
+
+    # Step 6: Build top searches report
+    top_searches = []
+    for kw, score in sorted(interest.items(), key=lambda x: x[1], reverse=True)[:10]:
+        matching_types = list(kw_to_types.get(kw, set()))
+        matching_count = sum(1 for v in venues
+                            if v.get("amenity_type", "").lower() in matching_types)
+        top_searches.append({
+            "keyword": kw,
+            "score": score,
+            "venue_types": matching_types,
+            "matching_venues": matching_count,
+        })
+
+    # Step 7: Spatial convergence heatmap
+    heatmap = []
+    max_score = max(venue_scores.values()) if venue_scores else 1
+    for v in venues:
+        s = venue_scores.get(v.get("name", ""), 0)
+        if s > 5 and max_score > 0:
+            weight = s / max_score
+            heatmap.append([v["lat"], v["lon"], weight])
+
+    return {
+        "venue_scores": venue_scores,
+        "top_searches": top_searches,
+        "heatmap": heatmap,
+    }

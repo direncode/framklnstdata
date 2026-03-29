@@ -25,9 +25,9 @@ export default function StatusBar({
       </div>
       <div className="flex items-center gap-4">
         <span className="text-[#00d4aa]">BTUT MFG</span>
+        <span className="text-[#ffaa00]">Search Conv.</span>
         <span>OSM Overpass</span>
         <span>Google Trends</span>
-        <span>Reddit</span>
         <span>UNC Calendar</span>
       </div>
     </div>

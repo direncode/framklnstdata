@@ -103,7 +103,7 @@ def fetch_nearby_places(radius_meters=None):
     query = f"""
     [out:json][timeout:60];
     (
-      node["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub|food_court|ice_cream|biergarten|brewery|wine_bar"]{s},{w},{n},{e});
+      node["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub|food_court|ice_cream|biergarten|brewery|wine_bar"]({s},{w},{n},{e});
       way["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub|food_court|ice_cream|biergarten|brewery|wine_bar"]({s},{w},{n},{e});
       node["amenity"~"cinema|theatre|arts_centre|community_centre|events_venue|music_venue|nightclub|casino|bowling_alley"]({s},{w},{n},{e});
       way["amenity"~"cinema|theatre|arts_centre|community_centre|events_venue|music_venue|nightclub|casino|bowling_alley"]({s},{w},{n},{e});

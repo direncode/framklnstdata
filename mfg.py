@@ -219,6 +219,12 @@ class FranklinStreetMFG:
                     trends_boost = max(trends_boost, score / 100.0)
             attraction += trends_boost * w["trends_boost"]
 
+            # Search convergence boost — trending searches pull density toward matching venues
+            search_conv = signals.get("search_convergence") or {}
+            conv_score = search_conv.get(name, 0) / 100.0
+            if conv_score > 0:
+                attraction += conv_score * w.get("search_convergence", 0.25)
+
             # Apply day and weather modulation
             attraction *= day_mult * w["day_of_week"]
             attraction *= weather_factor * (1.0 + (1.0 - weather_factor) * w["weather_damping"])
@@ -435,6 +441,7 @@ def collect_signals() -> dict:
         "weather": None,
         "events": None,
         "reddit_activity": None,
+        "search_convergence": None,
     }
 
     # Google Trends interest scores
@@ -444,6 +451,18 @@ def collect_signals() -> dict:
         scores = fetch_trends(keywords=SEED_KEYWORDS[:5])
         if scores:
             signals["trends_interest"] = scores
+    except Exception:
+        pass
+
+    # Search convergence (venue-type search trajectory)
+    try:
+        from trends import compute_search_convergence
+        from traffic import fetch_nearby_places
+        venues = fetch_nearby_places()
+        if venues:
+            convergence = compute_search_convergence(venues)
+            if convergence and convergence.get("venue_scores"):
+                signals["search_convergence"] = convergence["venue_scores"]
     except Exception:
         pass
 

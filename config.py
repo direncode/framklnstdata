@@ -84,6 +84,41 @@ DEFAULT_GEO = "US-NC-560"  # DMA 560 = Raleigh-Durham-Fayetteville (includes Cha
 DEFAULT_TIMEFRAME = "now 7-d"
 TRENDS_TIMEZONE = 300  # EST
 
+# Modular trend areas — Chapel Hill default, expandable to Triangle
+TREND_AREAS = {
+    "chapel_hill": {"geo": "US-NC-560", "label": "Chapel Hill / Triangle NC"},
+    "raleigh":     {"geo": "US-NC-560", "label": "Raleigh-Durham DMA"},
+    "charlotte":   {"geo": "US-NC-517", "label": "Charlotte DMA"},
+    "national":    {"geo": "US",        "label": "United States"},
+}
+DEFAULT_TREND_AREA = "chapel_hill"
+
+# Search keyword → venue type mapping for convergence analysis
+# Maps trending search terms to venue categories they predict traffic for
+VENUE_SEARCH_KEYWORDS = {
+    "bar":        ["bars", "nightlife", "drinks", "cocktails", "happy hour", "beer",
+                   "wine bar", "brewery", "craft beer", "karaoke", "pub crawl"],
+    "restaurant": ["restaurants", "dining", "food", "eat", "dinner", "lunch",
+                   "brunch", "sushi", "mexican food", "italian", "thai",
+                   "indian food", "ramen", "steakhouse", "seafood"],
+    "cafe":       ["coffee", "cafe", "espresso", "latte", "study spot", "wifi",
+                   "bakery", "pastry", "tea", "matcha"],
+    "nightclub":  ["clubs", "dancing", "DJ", "nightlife", "party", "rave",
+                   "EDM", "hip hop night", "ladies night"],
+    "pub":        ["pub", "bar", "beer", "wings", "trivia night", "sports bar",
+                   "game day", "watch party"],
+    "fast_food":  ["fast food", "takeout", "burgers", "pizza", "delivery",
+                   "drive through", "late night food", "cheap eats"],
+    "ice_cream":  ["ice cream", "frozen yogurt", "dessert", "gelato", "sweets"],
+    "supermarket": ["grocery", "supermarket", "food store", "organic"],
+    "fitness_centre": ["gym", "fitness", "workout", "yoga", "crossfit", "pilates"],
+    "cinema":     ["movies", "cinema", "film", "theater", "IMAX", "new movies"],
+    "hotel":      ["hotel", "lodging", "stay", "accommodation", "Airbnb"],
+    "pharmacy":   ["pharmacy", "drugstore", "medicine", "prescription"],
+    "bookstore":  ["books", "bookstore", "reading", "Barnes Noble"],
+    "shopping":   ["shopping", "clothes", "retail", "sale", "outlet", "mall"],
+}
+
 SEED_KEYWORDS = [
     "UNC basketball",
     "UNC Chapel Hill",
@@ -154,6 +189,7 @@ MFG_SIGNAL_WEIGHTS = {
     "weather_damping": 0.2,            # Bad weather reduces drift magnitude
     "event_surge": 0.25,               # UNC event proximity boost
     "day_of_week": 0.4,                # Weekend vs weekday multiplier
+    "search_convergence": 0.25,        # Search trajectory → venue convergence
 }
 
 # Typical hourly activity profiles by venue type (0-100, index = hour 0-23)
