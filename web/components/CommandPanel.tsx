@@ -85,14 +85,18 @@ export default function CommandPanel({ hour }: { hour: number }) {
     if (convData && convData.venues_with_signal > 0) {
       setConvergence(convData);
     } else if (spotsRes.status === "fulfilled" && spotsRes.value) {
-      // Fallback: build from spots busyness data
+      // Fallback: build from spots busyness — food/drink/entertainment only
       const spots = spotsRes.value?.spots || [];
+      const relevantTypes = new Set([
+        "bar", "restaurant", "cafe", "pub", "fast_food", "nightclub",
+        "ice_cream", "biergarten", "brewery", "wine_bar", "music_venue",
+      ]);
       const typeScores: Record<string, number[]> = {};
       const venueScores: Record<string, number> = {};
       for (const s of spots) {
         const b = s.busyness ?? 0;
-        if (b > 0) {
-          const t = s.amenity_type || "unknown";
+        const t = s.amenity_type || "unknown";
+        if (b > 0 && relevantTypes.has(t)) {
           if (!typeScores[t]) typeScores[t] = [];
           typeScores[t].push(b);
           venueScores[s.name] = b;

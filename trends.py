@@ -104,37 +104,7 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     except Exception as e:
         print(f"  [!] Local trends (events): {e}")
 
-    # --- Source 2: Reddit r/UNC + r/chapelhill (what students discuss) ---
-    try:
-        for sub in ["UNC", "chapelhill"]:
-            url = f"https://www.reddit.com/r/{sub}/hot.json?limit=10"
-            resp = requests.get(url, timeout=8, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; FranklinStData/4.0)",
-            })
-            if resp.status_code == 200:
-                data = resp.json()
-                for child in data.get("data", {}).get("children", []):
-                    post = child.get("data", {})
-                    title = post.get("title", "").lower()
-                    score = post.get("score", 0)
-
-                    # Score venue types by post title keyword matches
-                    for vtype, vkws in VENUE_SEARCH_KEYWORDS.items():
-                        if any(kw.lower() in title for kw in vkws[:5]):
-                            boost = min(score / 10, 30)  # Higher Reddit score = more interest
-                            results[vtype] = results.get(vtype, 0) + boost
-
-                    # Extract as local topic
-                    if score > 5:
-                        local_topics.append({
-                            "source": f"r/{sub}",
-                            "topic": post.get("title", "")[:80],
-                            "score": min(score, 100),
-                        })
-            time.sleep(0.5)
-        print(f"  [+] Local trends: Reddit analyzed")
-    except Exception as e:
-        print(f"  [!] Local trends (Reddit): {e}")
+    # --- Source 2: Reddit — removed (rate limited on Fly.io servers) ---
 
     # --- Source 3: Google Trends RSS (national, filtered for local) ---
     try:
