@@ -19,8 +19,38 @@ import json
 import math
 from datetime import datetime, timedelta
 
+import threading
+
 from config import CACHE_DIR, FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS
 from traffic import fetch_nearby_places
+
+_bg_signals_started = False
+
+
+def _start_background_signals():
+    """Kick off signal collection in background thread.
+    Results are cached in mfg._signals_cache for next request."""
+    global _bg_signals_started
+    if _bg_signals_started:
+        return
+    _bg_signals_started = True
+
+    def _collect():
+        global _bg_signals_started
+        try:
+            from mfg import collect_signals, _signals_cache
+            print("  [*] Background: collecting live signals...")
+            signals = collect_signals()
+            _signals_cache["latest"] = signals
+            active = sum(1 for v in signals.values() if v is not None)
+            print(f"  [+] Background: {active} signals ready")
+        except Exception as e:
+            print(f"  [!] Background signal error: {e}")
+        finally:
+            _bg_signals_started = False
+
+    t = threading.Thread(target=_collect, daemon=True)
+    t.start()
 
 
 # ---------------------------------------------------------------------------
@@ -134,30 +164,28 @@ def get_venues_with_busyness(hour=None, radius_meters=None):
         osm_venues = []
 
     # Step 2: Run BTUT Mean-Field Game engine
+    #
+    # Fast path: solve with empty signals (time profiles + opening hours only).
+    # Signals (trends, weather, events) are collected in background and
+    # cached for subsequent requests. This makes first response instant.
     try:
-        from mfg import get_mfg_engine, collect_signals
+        from mfg import get_mfg_engine, collect_signals, _signals_cache
 
-        print(f"  [*] BTUT: solving density field (hour={hour}, day={day_of_week}, "
-              f"venues={len(osm_venues)})...")
-        signals = collect_signals()
         engine = get_mfg_engine(osm_venues)
 
-        # Solve for this hour
+        # Use cached signals if available, otherwise empty (instant)
+        signals = _signals_cache.get("latest") or {}
+        if not signals:
+            print(f"  [*] BTUT: fast solve (time profiles only, hour={hour})")
+        else:
+            print(f"  [*] BTUT: solving with live signals (hour={hour})")
+
+        # Solve for this hour only (skip 24h on first load)
         result = engine.solve_hour(hour, day_of_week, signals)
         nash_gap = result["nash_gap"]
         iterations = result["iterations"]
-        converged = nash_gap < 1e-4
 
-        print(f"  [+] BTUT: converged={'yes' if converged else 'approx'} "
-              f"(gap={nash_gap:.2e}, {iterations} steps, {len(osm_venues)} venues)")
-
-        # Also generate 24-hour profiles
-        profiles_24h = {}
-        try:
-            result_24h = engine.solve_24h(day_of_week, signals)
-            profiles_24h = result_24h.get("hourly_profiles", {})
-        except Exception:
-            pass
+        print(f"  [+] BTUT: done ({iterations} steps, {len(osm_venues)} venues)")
 
         # Build venue list with MFG busyness + full metadata
         venues = []
@@ -168,11 +196,14 @@ def get_venues_with_busyness(hour=None, radius_meters=None):
             venues.append(_build_venue(
                 i, place,
                 busyness=vb.get("busyness"),
-                hourly_profile=profiles_24h.get(name),
+                hourly_profile=None,  # Skip 24h on fast path
                 busyness_source="btut_mfg",
                 nash_gap=nash_gap,
                 closed=vb.get("closed", False),
             ))
+
+        # Kick off background signal collection for next request
+        _start_background_signals()
 
     except ImportError:
         print("  [!] BTUT engine unavailable (numpy not installed)")

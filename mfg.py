@@ -671,6 +671,10 @@ def collect_signals() -> dict:
 _engine_cache: Optional[FranklinStreetMFG] = None
 _engine_venue_count: int = 0
 
+# Signals cache — populated by background thread, read by fast path
+_signals_cache: dict = {}
+_signals_collecting: bool = False
+
 
 def get_mfg_engine(venues: list[dict]) -> FranklinStreetMFG:
     """Get or create the MFG engine (cached singleton)."""
