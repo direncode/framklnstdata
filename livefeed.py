@@ -82,7 +82,7 @@ def fetch_reddit_feed(subreddits=None, limit=15):
         url = f"https://www.reddit.com/r/{sub}/new.json?limit={limit}"
         try:
             resp = requests.get(url, timeout=10, headers={
-                "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
+                "User-Agent": "Mozilla/5.0 (compatible; FranklinStData/4.0; academic research)",
             })
             if resp.status_code == 200:
                 data = resp.json()
@@ -129,7 +129,8 @@ def fetch_dth_feed():
 
     try:
         resp = requests.get(url, timeout=10, headers={
-            "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
+            "User-Agent": "Mozilla/5.0 (compatible; academic research)",
+            "Accept": "application/rss+xml, application/xml, text/xml",
         })
         resp.raise_for_status()
 

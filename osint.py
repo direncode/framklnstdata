@@ -95,9 +95,9 @@ def fetch_transit_stops():
                     except (ValueError, TypeError):
                         continue
 
-                    # Filter to Franklin Street area
-                    if (FRANKLIN_STREET_BOUNDS["south"] - 0.005 <= lat <= FRANKLIN_STREET_BOUNDS["north"] + 0.005
-                        and FRANKLIN_STREET_BOUNDS["west"] - 0.005 <= lon <= FRANKLIN_STREET_BOUNDS["east"] + 0.005):
+                    # Filter to Chapel Hill area (expanded bounds)
+                    if (35.880 <= lat <= 35.960
+                        and -79.110 <= lon <= -79.010):
                         stops.append({
                             "stop_id": row.get("stop_id", ""),
                             "stop_name": row.get("stop_name", ""),
@@ -128,9 +128,8 @@ def fetch_crime_data():
     if cached:
         return cached
 
-    # Chapel Hill publishes incident data via ArcGIS
-    bounds = FRANKLIN_STREET_BOUNDS
-    bbox = f"{bounds['west']},{bounds['south']},{bounds['east']},{bounds['north']}"
+    # Chapel Hill publishes incident data via ArcGIS (full Chapel Hill area)
+    bbox = "-79.110,35.880,-79.010,35.960"
 
     url = (
         "https://services1.arcgis.com/jOyGkcqHAywMxJEv/arcgis/rest/services"
