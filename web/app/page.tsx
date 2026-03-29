@@ -8,8 +8,9 @@ import VenuePanel from "@/components/VenuePanel";
 import FeedView from "@/components/FeedView";
 import HourSlider from "@/components/HourSlider";
 import StatusBar from "@/components/StatusBar";
+import CommandPanel from "@/components/CommandPanel";
 
-type Tab = "map" | "feed" | "intel";
+type Tab = "map" | "feed" | "intel" | "command";
 
 interface Venue {
   name: string;
@@ -18,6 +19,15 @@ interface Venue {
   amenity_type: string;
   busyness: number | null;
   hourly_profile: number[] | null;
+  cuisine?: string;
+  address?: string;
+  category?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  outdoor_seating?: string;
+  brand?: string;
+  signals?: Record<string, string>;
 }
 
 interface TrendsData {
@@ -41,6 +51,12 @@ interface TrendsData {
 
 const API_BASE = "/api/data";
 
+interface HeatmapPoint {
+  lat: number;
+  lon: number;
+  weight: number;
+}
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>("map");
   const [hour, setHour] = useState(new Date().getHours());
@@ -48,17 +64,23 @@ export default function Home() {
   const [selectedVenue, setSelectedVenue] = useState<string | null>(null);
   const [trends, setTrends] = useState<TrendsData | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showTraffic, setShowTraffic] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [trafficHeatmap, setTrafficHeatmap] = useState<HeatmapPoint[]>([]);
+  const [searchHeatmap, setSearchHeatmap] = useState<HeatmapPoint[]>([]);
 
   const fetchVenues = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/spots?hour=${hour}`);
       if (res.ok) {
         const data = await res.json();
-        // Backend returns {spots: [...]} or {query: ..., spots: [...]}
         const list = data?.spots || data?.venues || (Array.isArray(data) ? data : []);
         if (list.length > 0) {
           setVenues(list);
           setApiConnected(true);
+          setLoading(false);
           return;
         }
       }
@@ -72,12 +94,14 @@ export default function Home() {
         if (list.length > 0) {
           setVenues(list);
           setApiConnected(true);
+          setLoading(false);
           return;
         }
       }
     } catch { /* empty */ }
     setVenues([]);
     setApiConnected(false);
+    setLoading(false);
   }, [hour]);
 
   const fetchTrends = useCallback(async () => {
@@ -90,9 +114,45 @@ export default function Home() {
     } catch { /* empty */ }
   }, []);
 
+  const fetchHeatmaps = useCallback(async () => {
+    // Traffic heatmap from BTUT density field
+    if (showTraffic) {
+      try {
+        const res = await fetch(`${API_BASE}/heatmap?hour=${hour}`);
+        if (res.ok) {
+          const data = await res.json();
+          const points = data?.heatmap || (Array.isArray(data) ? data : []);
+          // Backend returns [[lat, lon, weight], ...] or {heatmap: [...]}
+          const mapped = points.map((p: number[] | HeatmapPoint) =>
+            Array.isArray(p) ? { lat: p[0], lon: p[1], weight: p[2] } : p
+          );
+          setTrafficHeatmap(mapped);
+        }
+      } catch { /* empty */ }
+    }
+    // Search convergence heatmap
+    if (showSearch) {
+      try {
+        const res = await fetch(`${API_BASE}/convergence?hour=${hour}`);
+        if (res.ok) {
+          const data = await res.json();
+          const points = data?.heatmap || [];
+          const mapped = points.map((p: number[] | HeatmapPoint) =>
+            Array.isArray(p) ? { lat: p[0], lon: p[1], weight: p[2] } : p
+          );
+          setSearchHeatmap(mapped);
+        }
+      } catch { /* empty */ }
+    }
+  }, [hour, showTraffic, showSearch]);
+
   useEffect(() => {
     fetchVenues();
   }, [fetchVenues]);
+
+  useEffect(() => {
+    fetchHeatmaps();
+  }, [fetchHeatmaps]);
 
   useEffect(() => {
     if (tab === "feed") fetchTrends();
@@ -102,6 +162,22 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
+      {/* Loading overlay */}
+      {loading && venues.length === 0 && (
+        <div className="fixed inset-0 z-50 bg-[#0a0b0f] flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-2xl font-mono text-[#00d4aa] mb-3 animate-pulse">
+              ███ FRANKLIN STREET DATA ███
+            </div>
+            <div className="text-sm font-mono text-[#454a58]">
+              Connecting to BTUT Mean-Field Game Engine...
+            </div>
+            <div className="mt-4 w-48 h-0.5 bg-[#1e2028] rounded-full overflow-hidden mx-auto">
+              <div className="h-full bg-[#00d4aa] rounded-full animate-[loading_2s_ease-in-out_infinite]" style={{width: "60%"}} />
+            </div>
+          </div>
+        </div>
+      )}
       <TopBar />
 
       <div className="flex-1 flex overflow-hidden">
@@ -139,6 +215,37 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Heatmap Layers */}
+              <div className="px-4 py-3 border-b border-[#1e2028]">
+                <div className="text-[10px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-2">
+                  Map Layers
+                </div>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowTraffic(!showTraffic)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showTraffic
+                        ? "bg-[#ff660020] text-[#ff6600] border border-[#ff660044]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showTraffic ? "bg-[#ff6600]" : "bg-[#1e2028]"}`} />
+                    Traffic Density
+                  </button>
+                  <button
+                    onClick={() => setShowSearch(!showSearch)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showSearch
+                        ? "bg-[#a050ff20] text-[#a050ff] border border-[#a050ff44]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showSearch ? "bg-[#a050ff]" : "bg-[#1e2028]"}`} />
+                    Search Convergence
+                  </button>
+                </div>
+              </div>
+
               {/* Data sources */}
               <div className="px-4 py-3 flex-1">
                 <div className="text-[10px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-2">
@@ -146,9 +253,9 @@ export default function Home() {
                 </div>
                 <div className="space-y-1.5 text-[10px] font-mono">
                   {[
+                    { name: "BTUT Engine", status: liveCount > 0 },
                     { name: "OpenStreetMap", status: apiConnected },
-                    { name: "Google Places", status: liveCount > 0 },
-                    { name: "NCDOT ArcGIS", status: apiConnected },
+                    { name: "Google Trends", status: apiConnected },
                   ].map((s) => (
                     <div key={s.name} className="flex items-center gap-2">
                       <span
@@ -171,6 +278,10 @@ export default function Home() {
                 venues={venues}
                 hour={hour}
                 onVenueClick={(v) => setSelectedVenue(v.name)}
+                trafficHeatmap={trafficHeatmap}
+                searchHeatmap={searchHeatmap}
+                showTraffic={showTraffic}
+                showSearch={showSearch}
               />
             </div>
 
@@ -193,6 +304,10 @@ export default function Home() {
           />
         )}
 
+        {tab === "command" && (
+          <CommandPanel hour={hour} />
+        )}
+
         {tab === "intel" && (
           <div className="flex-1 p-8 overflow-y-auto grid-overlay">
             <h2 className="text-[10px] font-mono tracking-[0.2em] text-[#00d4aa] uppercase mb-6">
@@ -206,17 +321,17 @@ export default function Home() {
                 <div className="text-[10px] text-[#454a58] mt-1">via OpenStreetMap Overpass</div>
               </div>
               <div className="metric-card glow-blue">
-                <div className="text-[9px] text-[#454a58] uppercase">Live Busyness</div>
+                <div className="text-[9px] text-[#454a58] uppercase">BTUT Density</div>
                 <div className="text-3xl font-mono text-[#4a9eff] mt-1">{liveCount}</div>
-                <div className="text-[10px] text-[#454a58] mt-1">via Google Places API</div>
+                <div className="text-[10px] text-[#454a58] mt-1">via Fokker-Planck MFG</div>
               </div>
               <div className="metric-card">
                 <div className="text-[9px] text-[#454a58] uppercase">API Status</div>
-                <div className={`text-3xl font-mono mt-1 ${apiConnected ? "text-[#00d4aa]" : "text-[#ff4d6a]"}`}>
-                  {apiConnected ? "LIVE" : "OFFLINE"}
+                <div className={`text-3xl font-mono mt-1 ${apiConnected ? "text-[#00d4aa]" : loading ? "text-[#ffaa00]" : "text-[#ff4d6a]"}`}>
+                  {apiConnected ? "LIVE" : loading ? "..." : "OFFLINE"}
                 </div>
                 <div className="text-[10px] text-[#454a58] mt-1">
-                  {apiConnected ? "All feeds active" : "Set BACKEND_URL"}
+                  {apiConnected ? "All feeds active" : loading ? "Connecting to BTUT engine" : "Set BACKEND_URL"}
                 </div>
               </div>
             </div>
@@ -233,19 +348,19 @@ export default function Home() {
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">02</span>
-                  <span>Google Places API fetches hourly busyness (0-100%) for each venue. This is the only ranking signal.</span>
+                  <span>Live signals are collected: Google Trends interest scores, weather conditions, UNC events calendar, Reddit activity, and time-of-day venue profiles.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">03</span>
-                  <span>Busyness values become heat map weights. Linear interpolation between venues creates a convergent foot traffic corridor.</span>
+                  <span>The BTUT engine fuses all signals into a drift velocity field v[&rho;], then solves the Fokker-Planck PDE: &part;&rho;/&part;t = -&nabla;&middot;(v[&rho;]&rho;) + &sigma;&sup2;/2 &Delta;&rho; to convergence.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">04</span>
-                  <span>Live feeds (Reddit, DTH, UNC Calendar, Google Trends) extract keywords and surface trending topics.</span>
+                  <span>The density field &rho;(x,t) is sampled at each venue position to produce busyness scores (0-100%), and along the corridor spine for the continuous heat map.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">05</span>
-                  <span>Move the hour slider. Watch busyness shift. Go where the convergence is hottest.</span>
+                  <span>Move the hour slider. Watch the density field shift as venue type profiles change — cafes peak at morning, bars at night. The mean-field finds approximate Nash equilibrium.</span>
                 </div>
               </div>
             </div>

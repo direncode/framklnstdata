@@ -7,6 +7,16 @@ interface Venue {
   amenity_type: string;
   busyness: number | null;
   hourly_profile: number[] | null;
+  cuisine?: string;
+  address?: string;
+  category?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  outdoor_seating?: string;
+  brand?: string;
+  closed?: boolean;
+  signals?: Record<string, string>;
 }
 
 function BusynessBar({ value }: { value: number }) {
@@ -90,7 +100,9 @@ export default function VenuePanel({
           >
             <div className="flex items-center justify-between">
               <span className="text-sm text-[#e2e4e9] truncate max-w-[180px]">{v.name}</span>
-              {v.busyness != null && v.busyness > 0 ? (
+              {v.closed ? (
+                <span className="text-[10px] font-mono text-[#ff4d6a]">CLOSED</span>
+              ) : v.busyness != null && v.busyness > 0 ? (
                 <span
                   className="text-xs font-mono font-bold"
                   style={{
@@ -111,7 +123,12 @@ export default function VenuePanel({
               )}
             </div>
 
-            <div className="text-[10px] text-[#454a58] mt-0.5">{v.amenity_type}</div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[10px] text-[#454a58]">{v.amenity_type}</span>
+              {v.cuisine && (
+                <span className="text-[9px] text-[#6b7080]">{v.cuisine.split(";")[0]}</span>
+              )}
+            </div>
 
             {v.busyness != null && v.busyness > 0 && (
               <div className="mt-1.5">
@@ -119,15 +136,81 @@ export default function VenuePanel({
               </div>
             )}
 
-            {selectedVenue === v.name && v.hourly_profile && (
-              <div className="mt-2">
-                <div className="text-[9px] text-[#454a58] font-mono mb-0.5">24h profile</div>
-                <Sparkline data={v.hourly_profile} />
-                <div className="flex justify-between text-[8px] text-[#454a58] font-mono mt-0.5">
-                  <span>0:00</span>
-                  <span>12:00</span>
-                  <span>23:00</span>
+            {selectedVenue === v.name && (
+              <div className="mt-2 space-y-1.5">
+                {/* Address */}
+                {v.address && (
+                  <div className="text-[10px] text-[#6b7080]">{v.address}</div>
+                )}
+
+                {/* Metadata tags */}
+                <div className="flex flex-wrap gap-1">
+                  {v.outdoor_seating === "yes" && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#00d4aa15] text-[#00d4aa] font-mono">PATIO</span>
+                  )}
+                  {v.category && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#4a9eff15] text-[#4a9eff] font-mono uppercase">{v.category}</span>
+                  )}
+                  {v.brand && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#1e2028] text-[#6b7080] font-mono">{v.brand}</span>
+                  )}
                 </div>
+
+                {/* Hours */}
+                {v.opening_hours && (
+                  <div className="text-[9px] text-[#454a58] font-mono truncate">{v.opening_hours}</div>
+                )}
+
+                {/* Contact */}
+                {v.phone && (
+                  <div className="text-[9px] text-[#454a58]">{v.phone}</div>
+                )}
+                {v.website && (
+                  <a
+                    href={v.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-[#4a9eff] hover:underline truncate block"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {v.website.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}
+                  </a>
+                )}
+
+                {/* Signal breakdown — WHY this score */}
+                {v.signals && Object.keys(v.signals).length > 0 && (
+                  <div>
+                    <div className="text-[9px] text-[#454a58] font-mono mb-1 uppercase tracking-wider">Signal Analysis</div>
+                    <div className="space-y-0.5">
+                      {Object.entries(v.signals).map(([key, val]) => (
+                        <div key={key} className="flex items-start gap-1.5 text-[9px]">
+                          <span className={`shrink-0 mt-0.5 w-1 h-1 rounded-full ${
+                            key === "status" ? (val === "OPEN" ? "bg-[#00d4aa]" : "bg-[#ff4d6a]") :
+                            key === "weather" ? "bg-[#4a9eff]" :
+                            key === "search_convergence" ? "bg-[#a050ff]" :
+                            key === "events" ? "bg-[#ffaa00]" :
+                            key === "reddit" ? "bg-[#ff6600]" :
+                            "bg-[#454a58]"
+                          }`} />
+                          <span className="text-[#6b7080]">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 24h profile */}
+                {v.hourly_profile && (
+                  <div>
+                    <div className="text-[9px] text-[#454a58] font-mono mb-0.5">24h profile</div>
+                    <Sparkline data={v.hourly_profile} />
+                    <div className="flex justify-between text-[8px] text-[#454a58] font-mono mt-0.5">
+                      <span>0:00</span>
+                      <span>12:00</span>
+                      <span>23:00</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </button>

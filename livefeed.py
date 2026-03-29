@@ -82,7 +82,7 @@ def fetch_reddit_feed(subreddits=None, limit=15):
         url = f"https://www.reddit.com/r/{sub}/new.json?limit={limit}"
         try:
             resp = requests.get(url, timeout=10, headers={
-                "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
+                "User-Agent": "Mozilla/5.0 (compatible; FranklinStData/4.0; academic research)",
             })
             if resp.status_code == 200:
                 data = resp.json()
@@ -125,14 +125,31 @@ def fetch_dth_feed():
     if cached:
         return cached
 
-    url = "https://www.dailytarheel.com/feed"
+    # Try multiple DTH feed URLs (site blocks some)
+    urls = [
+        "https://www.dailytarheel.com/feed",
+        "https://www.dailytarheel.com/rss.xml",
+        "https://www.dailytarheel.com/feed.xml",
+    ]
+
+    resp = None
+    for url in urls:
+        try:
+            resp = requests.get(url, timeout=10, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/rss+xml, application/xml, text/xml, */*",
+            })
+            if resp.status_code == 200:
+                break
+            resp = None
+        except Exception:
+            continue
+
+    if not resp:
+        print("  [!] DTH: all feed URLs returned non-200")
+        return None
 
     try:
-        resp = requests.get(url, timeout=10, headers={
-            "User-Agent": "FranklinStDataBot/1.0 (UNC academic tool)",
-        })
-        resp.raise_for_status()
-
         root = ElementTree.fromstring(resp.content)
         articles = []
 

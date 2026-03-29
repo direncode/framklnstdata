@@ -38,6 +38,7 @@ import json
 import copy
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 from config import FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS, DEFAULT_GEO
@@ -79,8 +80,9 @@ from network import (
 from main import generate_report
 
 # Version
-API_VERSION = "3.0.0"
+API_VERSION = "4.0.0"
 API_NAME = "Franklin Street Data Datastream"
+ENGINE_NAME = "BTUT Mean-Field Game Engine"
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +121,12 @@ def handle_root():
     return {
         "name": API_NAME,
         "version": API_VERSION,
+        "engine": ENGINE_NAME,
         "description": (
             "Surveillance-grade intelligence API for Franklin Street, "
-            "UNC Chapel Hill. Provides real-time foot traffic analysis, "
-            "venue intelligence, trend signals, demographic data, and "
-            "combined actionable reports."
+            "UNC Chapel Hill. Powered by the BTUT Fokker-Planck Mean-Field "
+            "Game engine for real-time foot traffic density modeling, "
+            "venue intelligence, trend signals, and combined reports."
         ),
         "center": {
             "lat": FRANKLIN_STREET_CENTER[0],
@@ -144,6 +147,8 @@ def handle_root():
             "/intel/events": "Event context and traffic multipliers",
             "/network": "Street network topology analysis",
             "/network/intersections": "Key intersections with connectivity scores",
+            "/density": "BTUT density field and convergence diagnostics",
+            "/convergence": "Search trajectory → venue convergence analysis",
             "/report": "Full combined text report",
             "/export": "Complete data export (all feeds combined)",
         },
@@ -153,15 +158,21 @@ def handle_root():
 
 def handle_status():
     """System health and data source status."""
-    from config import GOOGLE_PLACES_API_KEY
     import os
+
+    btut_status = "active"
+    try:
+        import numpy
+    except ImportError:
+        btut_status = "unavailable (numpy missing)"
 
     return {
         "status": "operational",
         "version": API_VERSION,
+        "engine": ENGINE_NAME,
         "timestamp": datetime.now().isoformat(),
         "data_feeds": {
-            "google_places": "active" if GOOGLE_PLACES_API_KEY else "no_key",
+            "btut_mfg": btut_status,
             "openstreetmap": "active",
             "ncdot_aadt": "active",
             "census": "active",
@@ -173,6 +184,7 @@ def handle_status():
             "center": list(FRANKLIN_STREET_CENTER),
             "radius_meters": 400,
             "venue_source": "OpenStreetMap Overpass API",
+            "busyness_source": "BTUT Fokker-Planck Density Solver",
         },
     }
 
@@ -182,7 +194,7 @@ def handle_spots(params):
     hour = _parse_hour(params.get("hour", [None])[0])
     day = params.get("day", [None])[0]
     tod = params.get("time", ["evening"])[0]
-    n = int(params.get("n", ["10"])[0])
+    n = int(params.get("n", ["500"])[0])
 
     spots = get_enriched_spots(time_of_day=tod, hour=hour, top_n=n)
 
@@ -198,6 +210,20 @@ def handle_spots(params):
                 "busyness": s.get("busyness"),
                 "composite_score": s.get("composite_score", 0),
                 "hourly_profile": s.get("hourly_profile"),
+                # Rich metadata
+                "cuisine": s.get("cuisine", ""),
+                "opening_hours": s.get("opening_hours", ""),
+                "phone": s.get("phone", ""),
+                "website": s.get("website", ""),
+                "address": s.get("address", ""),
+                "outdoor_seating": s.get("outdoor_seating", ""),
+                "brand": s.get("brand", ""),
+                "category": s.get("category", ""),
+                "wheelchair": s.get("wheelchair", ""),
+                "takeaway": s.get("takeaway", ""),
+                "delivery": s.get("delivery", ""),
+                "closed": s.get("closed", False),
+                "signals": s.get("signals", {}),
             }
             for i, s in enumerate(spots)
         ],
@@ -253,33 +279,17 @@ def handle_traffic(params):
 
 
 def handle_heatmap(params):
-    """Heat map data as GeoJSON-compatible points."""
+    """Heat map data as array of [lat, lon, weight] points."""
     hour = _parse_hour(params.get("hour", [None])[0])
     day = _parse_day(params.get("day", [None])[0])
 
-    spots = get_enriched_spots(hour=hour, top_n=10)
+    spots = get_enriched_spots(hour=hour, top_n=500)
     points = build_heatmap_data(spots, hour=hour, day_of_week=day)
 
-    # Convert to GeoJSON FeatureCollection
-    features = []
-    for pt in points:
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [pt[1], pt[0]],  # GeoJSON is [lon, lat]
-            },
-            "properties": {
-                "weight": pt[2],
-                "intensity": round(pt[2] * 100, 1),
-            },
-        })
-
     return {
-        "type": "FeatureCollection",
+        "heatmap": points,
+        "point_count": len(points),
         "query": {"hour": hour, "day_of_week": day},
-        "features": features,
-        "point_count": len(features),
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -297,42 +307,47 @@ def handle_venues():
 
 
 def handle_trends(params):
-    """Current trends and trivia suggestions."""
+    """Current trends and trivia suggestions. Cache-first for speed."""
     live = params.get("live", ["false"])[0].lower() == "true"
+    area = params.get("area", [None])[0]
 
-    if live:
-        trends_report = build_trends_report()
-    else:
-        trends_report = None
+    # Get cached local trends data (instant — populated by background thread)
+    local_trends = None
+    local_topics = []
+    try:
+        import mfg as mfg_module
+        cached = (mfg_module._signals_cache.get("latest") or {}).get("trends_interest")
+        if cached and isinstance(cached, dict):
+            local_trends = cached
+            local_topics = cached.get("_local_topics", [])
+    except Exception:
+        pass
 
-    suggestions, has_data = generate_trivia_suggestions(trends_report)
+    if live and local_trends is None:
+        # Direct fetch if no cache (will populate cache for next time)
+        from trends import fetch_trends
+        local_trends = fetch_trends()
+        if local_trends:
+            local_topics = local_trends.get("_local_topics", [])
+
+    # Build venue type interest from trends
+    type_interest = {}
+    if local_trends:
+        for k, v in local_trends.items():
+            if not k.startswith("_") and isinstance(v, (int, float)):
+                type_interest[k] = v
 
     return {
-        "has_data": has_data,
-        "geo": trends_report.get("geo", DEFAULT_GEO) if trends_report else DEFAULT_GEO,
-        "geo_description": trends_report.get("geo_description", "") if trends_report else "",
-        "suggestions": [
-            {
-                "category": s["category"],
-                "keyword": s["keyword"],
-                "score": s["score"],
-                "strength": s["strength"],
-                "suggestion": s["suggestion"],
-                "rising_queries": s.get("related_rising", []),
-                "rising_topics": s.get("rising_topics", []),
-                "top_cities": s.get("top_cities", []),
-            }
-            for s in suggestions
-        ],
-        "trending_now": (
-            trends_report.get("trending_now", []) if trends_report else []
-        ),
-        "locally_relevant": (
-            trends_report.get("locally_relevant", []) if trends_report else []
-        ),
-        "interest_by_city": (
-            trends_report.get("interest_by_city", {}) if trends_report else {}
-        ),
+        "has_data": bool(type_interest),
+        "geo": DEFAULT_GEO,
+        "geo_description": "Chapel Hill / Triangle NC (hyper-local)",
+        "type_interest": type_interest,
+        "local_topics": local_topics,
+        "suggestions": [],
+        "trending_now": [t["topic"] for t in local_topics[:10]],
+        "locally_relevant": [t["topic"] for t in local_topics
+                             if t.get("source") == "Google Trends"],
+        "interest_by_city": {},
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -460,6 +475,104 @@ def handle_forecast(params):
     return build_forecast_report()
 
 
+def handle_density(params):
+    """BTUT density field and convergence diagnostics. Cache-first."""
+    hour = _parse_hour(params.get("hour", [None])[0])
+
+    try:
+        import mfg as mfg_module
+
+        venues = fetch_nearby_places()
+        engine = mfg_module.get_mfg_engine(venues)
+        signals = mfg_module._signals_cache.get("latest") or {}
+        day = datetime.now().weekday()
+        result = engine.solve_hour(hour, day, signals)
+
+        density_list = result["density_field"].tolist()
+
+        return {
+            "engine": "BTUT v1.0",
+            "algorithm": "Fokker-Planck Mean-Field Game",
+            "equation": "∂ρ/∂t = -∇·(v[ρ]ρ) + σ²/2 Δρ",
+            "hour": hour,
+            "day_of_week": day,
+            "grid_size": len(density_list),
+            "nash_gap": result["nash_gap"],
+            "iterations": result["iterations"],
+            "converged": result["nash_gap"] < 1e-4,
+            "venue_busyness": result["venue_busyness"],
+            "signal_inputs": {
+                k: ("active" if v is not None else "unavailable")
+                for k, v in signals.items()
+            },
+            "density_field": density_list,
+            "heatmap": engine.density_to_heatmap(result["density_field"]),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except ImportError:
+        return {"error": "BTUT engine unavailable (numpy not installed)"}
+    except Exception as e:
+        return {"error": f"BTUT engine error: {str(e)}"}
+
+
+def handle_convergence(params):
+    """Search-to-venue convergence analysis. Cache-first — no API blocking."""
+    hour = _parse_hour(params.get("hour", [None])[0])
+
+    try:
+        import mfg as mfg_module
+        from config import MFG_VENUE_PROFILES
+
+        signals = mfg_module._signals_cache.get("latest") or {}
+        conv_by_type = signals.get("search_convergence_by_type") or {}
+
+        if not conv_by_type:
+            return {
+                "engine": "BTUT Search Convergence",
+                "hour": hour,
+                "status": "warming_up",
+                "message": "Collecting search signals in background...",
+                "venue_scores": {},
+                "top_searches": [],
+                "heatmap": [],
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        # Build per-venue scores from type-level convergence
+        venues = fetch_nearby_places()
+        venue_scores = {}
+        heatmap = []
+        for v in venues:
+            vtype = v.get("amenity_type", "unknown").lower()
+            score = int(conv_by_type.get(vtype, 0))
+            # Time modulate
+            profile = MFG_VENUE_PROFILES.get(vtype, {})
+            if isinstance(profile, list) and len(profile) > hour:
+                score = int(score * profile[hour] / 100.0)
+            venue_scores[v["name"]] = max(0, min(100, score))
+            if score > 5:
+                max_s = max(conv_by_type.values()) if conv_by_type else 1
+                heatmap.append([v["lat"], v["lon"], score / max_s])
+
+        top_searches = [
+            {"venue_type": vt, "score": int(s)}
+            for vt, s in sorted(conv_by_type.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
+
+        return {
+            "engine": "BTUT Search Convergence",
+            "hour": hour,
+            "venue_count": len(venue_scores),
+            "venues_with_signal": sum(1 for s in venue_scores.values() if s > 0),
+            "venue_scores": venue_scores,
+            "top_searches": top_searches,
+            "heatmap": heatmap,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"error": f"Search convergence error: {str(e)}"}
+
+
 def handle_export(params):
     """Complete data export — all feeds combined."""
     hour = _parse_hour(params.get("hour", [None])[0])
@@ -484,8 +597,13 @@ def handle_export(params):
 # HTTP Server
 # ---------------------------------------------------------------------------
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Multi-threaded HTTP server — health checks don't block behind long requests."""
+    daemon_threads = True
+
+
 class DataHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the Franklin Street Data API API."""
+    """HTTP request handler for the Franklin Street Data API."""
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -515,6 +633,8 @@ class DataHandler(BaseHTTPRequestHandler):
             "/osint/transit": handle_transit,
             "/livefeed": handle_livefeed,
             "/forecast": lambda: handle_forecast(params),
+            "/density": lambda: handle_density(params),
+            "/convergence": lambda: handle_convergence(params),
             "/report": lambda: handle_report(params),
             "/export": lambda: handle_export(params),
         }
@@ -537,18 +657,24 @@ class DataHandler(BaseHTTPRequestHandler):
                 "error": "Not found",
                 "available_endpoints": list(routes.keys()),
             }
-            self.send_response(404)
+            try:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps(result, indent=2, default=str).encode())
+            except BrokenPipeError:
+                pass
+            return
+
+        try:
+            self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result, indent=2, default=str).encode())
-            return
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(result, indent=2, default=str).encode())
+        except BrokenPipeError:
+            pass  # Client disconnected before response completed
 
     def log_message(self, format, *args):
         """Custom log format."""
@@ -577,7 +703,8 @@ if __name__ == "__main__":
 
     print()
     print("  ███ FRANKLIN STREET DATA ███")
-    print("  ═══ Datastream API ═══")
+    print("  ═══ Datastream API v4 ═══")
+    print("  ═══ BTUT Mean-Field Game Engine ═══")
     print()
     print(f"  Serving on http://{args.host}:{args.port}")
     print(f"  Docs:      http://localhost:{args.port}/")
@@ -591,13 +718,34 @@ if __name__ == "__main__":
     print("    /trends          Trending search intelligence")
     print("    /intel           Full OSINT briefing")
     print("    /network         Street network topology")
+    print("    /density         BTUT density field + convergence")
+    print("    /convergence     Search trajectory → venue mapping")
     print("    /report          Text surveillance report")
     print("    /export          Complete data export")
     print()
 
-    server = HTTPServer((args.host, args.port), DataHandler)
+    import signal
+
+    # Start background signal collection immediately at boot
+    try:
+        from spots import _start_background_signals
+        _start_background_signals()
+        print("  [*] Background signal collection started at boot")
+    except Exception as e:
+        print(f"  [!] Could not start background signals: {e}")
+
+    server = ThreadingHTTPServer((args.host, args.port), DataHandler)
+
+    def graceful_shutdown(signum, frame):
+        signame = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT"}.get(signum, str(signum))
+        print(f"\n  Received {signame}, shutting down...")
+        server.shutdown()
+
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n  Datastream shutdown.")
+    finally:
+        print("  Datastream shutdown.")
         server.server_close()

@@ -77,45 +77,73 @@ def _write_cache(key, data):
 # OpenStreetMap Overpass API - Venue Discovery
 # ---------------------------------------------------------------------------
 
-def fetch_nearby_places(radius_meters=400):
+def fetch_nearby_places(radius_meters=None):
     """
-    Query OpenStreetMap Overpass API to discover bars, restaurants, cafes,
-    and other amenities near Franklin Street. Completely free, no API key.
+    Query OpenStreetMap Overpass API to discover ALL venues across
+    Chapel Hill — bars, restaurants, cafes, shops, entertainment,
+    services, and more. Completely free, no API key.
 
-    Returns list of dicts: [{name, lat, lon, amenity_type}, ...]
+    Covers the full Chapel Hill bounding box (~16 km²).
+    Extracts comprehensive metadata per venue.
+
+    Returns list of dicts with rich metadata per venue.
     """
-    cache_key = _cache_key("overpass_places")
+    from config import CHAPEL_HILL_BOUNDS
+
+    cache_key = _cache_key("overpass_chapel_hill_full")
     if _is_cache_valid(cache_key, CACHE_TTL["overpass"]):
         cached = _read_cache(cache_key)
         if cached:
             return cached
 
-    lat, lon = FRANKLIN_STREET_CENTER
+    bbox = CHAPEL_HILL_BOUNDS
+    s, n, w, e = bbox["south"], bbox["north"], bbox["west"], bbox["east"]
+
+    # Comprehensive Overpass query covering all venue categories
     query = f"""
-    [out:json][timeout:30];
+    [out:json][timeout:60];
     (
-      node["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub"]
-        (around:{radius_meters},{lat},{lon});
-      way["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub"]
-        (around:{radius_meters},{lat},{lon});
+      node["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub|food_court|ice_cream|biergarten|brewery|wine_bar"]({s},{w},{n},{e});
+      way["amenity"~"bar|restaurant|cafe|pub|fast_food|nightclub|food_court|ice_cream|biergarten|brewery|wine_bar"]({s},{w},{n},{e});
+      node["amenity"~"cinema|theatre|arts_centre|community_centre|events_venue|music_venue|nightclub|casino|bowling_alley"]({s},{w},{n},{e});
+      way["amenity"~"cinema|theatre|arts_centre|community_centre|events_venue|music_venue|nightclub|casino|bowling_alley"]({s},{w},{n},{e});
+      node["amenity"~"pharmacy|bank|atm|post_office|library|marketplace|fuel|car_wash|dentist|doctors|clinic|hospital|veterinary"]({s},{w},{n},{e});
+      way["amenity"~"pharmacy|bank|atm|post_office|library|marketplace|fuel|car_wash|dentist|doctors|clinic|hospital|veterinary"]({s},{w},{n},{e});
+      node["shop"~"supermarket|convenience|clothes|books|electronics|hardware|florist|bakery|butcher|deli|greengrocer|beauty|hairdresser|tattoo|bicycle|sports|outdoor|gift|jewelry|optician|department_store|mall|music|alcohol|tobacco|coffee|tea|pastry|chocolate|cheese"]({s},{w},{n},{e});
+      way["shop"~"supermarket|convenience|clothes|books|electronics|hardware|florist|bakery|butcher|deli|greengrocer|beauty|hairdresser|tattoo|bicycle|sports|outdoor|gift|jewelry|optician|department_store|mall|music|alcohol|tobacco|coffee|tea|pastry|chocolate|cheese"]({s},{w},{n},{e});
+      node["leisure"~"fitness_centre|sports_centre|swimming_pool|bowling_alley|escape_game|amusement_arcade|dance|park|garden"]({s},{w},{n},{e});
+      way["leisure"~"fitness_centre|sports_centre|swimming_pool|bowling_alley|escape_game|amusement_arcade|dance|park|garden"]({s},{w},{n},{e});
+      node["tourism"~"hotel|motel|guest_house|hostel|museum|gallery|attraction|viewpoint|information"]({s},{w},{n},{e});
+      way["tourism"~"hotel|motel|guest_house|hostel|museum|gallery|attraction|viewpoint|information"]({s},{w},{n},{e});
     );
-    out center;
+    out center tags;
     """
 
     try:
         resp = requests.post(
             OVERPASS_API_URL,
             data={"data": query},
-            timeout=30,
+            timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
         print(f"  [!] Overpass API error: {e}")
+        # Fall back to cached data even if expired
+        cached = _read_cache(cache_key)
+        if cached:
+            print(f"  [+] Using stale cache ({len(cached)} venues)")
+            return cached
         return []
 
     places = []
+    seen_ids = set()
     for element in data.get("elements", []):
+        osm_id = element.get("id")
+        if osm_id in seen_ids:
+            continue
+        seen_ids.add(osm_id)
+
         tags = element.get("tags", {})
         name = tags.get("name")
         if not name:
@@ -130,20 +158,102 @@ def fetch_nearby_places(radius_meters=400):
             lat_e = center.get("lat")
             lon_e = center.get("lon")
 
-        if lat_e and lon_e:
-            places.append({
-                "name": name,
-                "lat": lat_e,
-                "lon": lon_e,
-                "amenity_type": tags.get("amenity", "unknown"),
-                "osm_id": element.get("id"),
-                "cuisine": tags.get("cuisine", ""),
-                "opening_hours": tags.get("opening_hours", ""),
-            })
+        if not lat_e or not lon_e:
+            continue
+
+        # Determine primary category
+        amenity = tags.get("amenity", "")
+        shop = tags.get("shop", "")
+        leisure = tags.get("leisure", "")
+        tourism = tags.get("tourism", "")
+        primary_type = amenity or shop or leisure or tourism or "unknown"
+
+        # Build comprehensive address
+        addr_parts = []
+        if tags.get("addr:housenumber"):
+            addr_parts.append(tags["addr:housenumber"])
+        if tags.get("addr:street"):
+            addr_parts.append(tags["addr:street"])
+        address = " ".join(addr_parts) if addr_parts else ""
+        if tags.get("addr:city"):
+            address += f", {tags['addr:city']}" if address else tags["addr:city"]
+
+        places.append({
+            "name": name,
+            "lat": lat_e,
+            "lon": lon_e,
+            "amenity_type": primary_type,
+            "osm_id": osm_id,
+            # Contact & web
+            "phone": tags.get("phone", tags.get("contact:phone", "")),
+            "website": tags.get("website", tags.get("contact:website", "")),
+            "email": tags.get("email", tags.get("contact:email", "")),
+            # Address
+            "address": address,
+            "addr_street": tags.get("addr:street", ""),
+            "addr_housenumber": tags.get("addr:housenumber", ""),
+            "addr_postcode": tags.get("addr:postcode", ""),
+            # Food & drink specifics
+            "cuisine": tags.get("cuisine", ""),
+            "diet_vegan": tags.get("diet:vegan", ""),
+            "diet_vegetarian": tags.get("diet:vegetarian", ""),
+            "takeaway": tags.get("takeaway", ""),
+            "delivery": tags.get("delivery", ""),
+            "outdoor_seating": tags.get("outdoor_seating", ""),
+            # Hours & access
+            "opening_hours": tags.get("opening_hours", ""),
+            "wheelchair": tags.get("wheelchair", ""),
+            "internet_access": tags.get("internet_access", ""),
+            # Brand & chain
+            "brand": tags.get("brand", ""),
+            "operator": tags.get("operator", ""),
+            # Descriptive
+            "description": tags.get("description", ""),
+            "wikipedia": tags.get("wikipedia", ""),
+            "wikidata": tags.get("wikidata", ""),
+            # Category tags
+            "category": _classify_venue(primary_type),
+        })
 
     _write_cache(cache_key, places)
-    print(f"  [+] Discovered {len(places)} venues via OpenStreetMap")
+    print(f"  [+] Discovered {len(places)} venues across Chapel Hill via OpenStreetMap")
     return places
+
+
+def _classify_venue(amenity_type):
+    """Classify venue into broad category for filtering and display."""
+    food_drink = {"bar", "restaurant", "cafe", "pub", "fast_food", "nightclub",
+                  "food_court", "ice_cream", "biergarten", "brewery", "wine_bar",
+                  "bakery", "butcher", "deli", "greengrocer", "pastry",
+                  "chocolate", "cheese", "coffee", "tea", "alcohol"}
+    entertainment = {"cinema", "theatre", "arts_centre", "community_centre",
+                     "events_venue", "music_venue", "casino", "bowling_alley",
+                     "escape_game", "amusement_arcade", "dance", "museum",
+                     "gallery", "attraction"}
+    shopping = {"supermarket", "convenience", "clothes", "books", "electronics",
+                "hardware", "florist", "beauty", "hairdresser", "tattoo",
+                "bicycle", "sports", "outdoor", "gift", "jewelry", "optician",
+                "department_store", "mall", "music", "tobacco"}
+    fitness = {"fitness_centre", "sports_centre", "swimming_pool", "park", "garden"}
+    lodging = {"hotel", "motel", "guest_house", "hostel"}
+    services = {"pharmacy", "bank", "atm", "post_office", "library",
+                "marketplace", "fuel", "car_wash", "dentist", "doctors",
+                "clinic", "hospital", "veterinary"}
+
+    t = amenity_type.lower()
+    if t in food_drink:
+        return "food_drink"
+    if t in entertainment:
+        return "entertainment"
+    if t in shopping:
+        return "shopping"
+    if t in fitness:
+        return "fitness"
+    if t in lodging:
+        return "lodging"
+    if t in services:
+        return "services"
+    return "other"
 
 
 # ---------------------------------------------------------------------------
@@ -250,16 +360,7 @@ def fetch_place_busyness(place_id):
 
 
 def get_current_busyness(place_name, place_id=None, hour=None):
-    """
-    Get the busyness score (0-100) for a venue at a specific hour.
-    Returns None if no live data available.
-    """
-    if hour is None:
-        hour = datetime.now().hour
-
-    hourly = fetch_popular_times(place_name, place_id)
-    if hourly and 0 <= hour < 24:
-        return hourly[hour]
+    """Legacy stub — busyness now comes from BTUT MFG engine."""
     return None
 
 
@@ -370,67 +471,26 @@ def get_ncdot_traffic():
 
 def build_heatmap_data(spots, hour=None, day_of_week=None):
     """
-    Build heat map from venue busyness data.
+    Build heat map from BTUT density field or venue busyness data.
 
-    Simple and honest:
-    1. Each venue with live busyness (Google Places) → point with real weight
-    2. Each OSM-discovered venue → point (we know it exists, weight = existence)
-    3. Linear interpolation between venues along the street spine
-       so the heat map shows a corridor, not isolated blobs
+    Primary: Uses the Fokker-Planck density field ρ(x,t) from the BTUT
+    Mean-Field Game engine for a continuous traffic corridor.
 
-    When Google Places API is unavailable, the heat map only shows
-    venue locations (existence) not busyness intensity.
+    Fallback: Per-venue interpolation along the street spine.
 
     Returns list of [lat, lon, weight] for folium.plugins.HeatMap.
     """
     if hour is None:
         hour = datetime.now().hour
 
+    # Heatmap = venue busyness at venue locations (no spine interpolation)
     heatmap_points = []
-    venue_weights = {}  # {(lat, lon): weight} for interpolation
 
-    # 1. Curated spots — use live busyness if available, else just mark location
     for spot in spots:
-        busyness = get_current_busyness(
-            spot["name"], spot.get("place_id"), hour=hour,
-        )
-        if busyness is not None:
-            # Real data from Google Places API
+        busyness = spot.get("busyness")
+        if busyness is not None and busyness > 0:
             weight = busyness / 100.0
-        else:
-            # No busyness data — just mark that a venue exists here
-            weight = 0.3
-        venue_weights[(spot["lat"], spot["lon"])] = weight
-        heatmap_points.append([spot["lat"], spot["lon"], weight])
-
-    # 2. OSM-discovered venues — existence signal only
-    try:
-        osm_places = fetch_nearby_places()
-        for place in osm_places:
-            # We know a venue is here. That's all we know.
-            venue_weights[(place["lat"], place["lon"])] = 0.2
-            heatmap_points.append([place["lat"], place["lon"], 0.2])
-    except Exception:
-        pass
-
-    # 3. Interpolate along the Franklin Street spine
-    #    Linear blend between nearest venue weights on each side.
-    #    This creates a continuous corridor instead of isolated dots.
-    for i in range(len(FRANKLIN_STREET_SPINE) - 1):
-        lat1, lon1 = FRANKLIN_STREET_SPINE[i]
-        lat2, lon2 = FRANKLIN_STREET_SPINE[i + 1]
-
-        w1 = _nearest_weight(lat1, lon1, venue_weights)
-        w2 = _nearest_weight(lat2, lon2, venue_weights)
-
-        # 4 intermediate points per segment, linearly blended
-        for j in range(1, 5):
-            t = j / 5.0
-            lat_mid = lat1 + t * (lat2 - lat1)
-            lon_mid = lon1 + t * (lon2 - lon1)
-            weight_mid = w1 + t * (w2 - w1)
-            if weight_mid > 0.05:
-                heatmap_points.append([lat_mid, lon_mid, weight_mid * 0.6])
+            heatmap_points.append([spot["lat"], spot["lon"], weight])
 
     return heatmap_points
 
@@ -452,22 +512,5 @@ def _nearest_weight(lat, lon, venue_weights):
 # ---------------------------------------------------------------------------
 
 def aggregate_busyness(spots, hour=None):
-    """
-    Enrich spots list with live busyness data.
-    Adds 'live_busyness' (0-100) and 'hourly_profile' (24-element list)
-    to each spot dict. Returns the enriched list.
-    """
-    if hour is None:
-        hour = datetime.now().hour
-
-    for spot in spots:
-        # Get full 24-hour profile (None if no API key)
-        hourly = fetch_popular_times(spot["name"], spot.get("place_id"))
-        spot["hourly_profile"] = hourly  # None if unavailable
-
-        # Get current busyness (None if no API key)
-        spot["live_busyness"] = get_current_busyness(
-            spot["name"], spot.get("place_id"), hour=hour
-        )
-
+    """Legacy stub — busyness now comes from BTUT MFG engine."""
     return spots
