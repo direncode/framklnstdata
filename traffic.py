@@ -483,50 +483,14 @@ def build_heatmap_data(spots, hour=None, day_of_week=None):
     if hour is None:
         hour = datetime.now().hour
 
-    # --- Primary: BTUT density field (continuous, much richer) ---
-    try:
-        import mfg as mfg_module
-        osm_venues = fetch_nearby_places()
-        if osm_venues:
-            engine = mfg_module.get_mfg_engine(osm_venues)
-            # Use cached signals (instant) — don't block on API calls
-            signals = mfg_module._signals_cache.get("latest") or {}
-            day = day_of_week if day_of_week is not None else datetime.now().weekday()
-            result = engine.solve_hour(hour, day, signals)
-            heatmap = engine.density_to_heatmap(result["density_field"])
-            if heatmap:
-                return heatmap
-    except Exception as e:
-        print(f"  [!] MFG heatmap error: {e}")
-
-    # --- Fallback: venue-based interpolation ---
+    # Heatmap = venue busyness at venue locations (no spine interpolation)
     heatmap_points = []
-    venue_weights = {}
 
     for spot in spots:
         busyness = spot.get("busyness")
         if busyness is not None and busyness > 0:
             weight = busyness / 100.0
-        else:
-            weight = 0.3
-        venue_weights[(spot["lat"], spot["lon"])] = weight
-        heatmap_points.append([spot["lat"], spot["lon"], weight])
-
-    # Interpolate along the Franklin Street spine
-    for i in range(len(FRANKLIN_STREET_SPINE) - 1):
-        lat1, lon1 = FRANKLIN_STREET_SPINE[i]
-        lat2, lon2 = FRANKLIN_STREET_SPINE[i + 1]
-
-        w1 = _nearest_weight(lat1, lon1, venue_weights)
-        w2 = _nearest_weight(lat2, lon2, venue_weights)
-
-        for j in range(1, 5):
-            t = j / 5.0
-            lat_mid = lat1 + t * (lat2 - lat1)
-            lon_mid = lon1 + t * (lon2 - lon1)
-            weight_mid = w1 + t * (w2 - w1)
-            if weight_mid > 0.05:
-                heatmap_points.append([lat_mid, lon_mid, weight_mid * 0.6])
+            heatmap_points.append([spot["lat"], spot["lon"], weight])
 
     return heatmap_points
 

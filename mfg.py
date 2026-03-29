@@ -758,33 +758,12 @@ def collect_signals() -> dict:
         "demographics": None,
     }
 
-    # --- 1. Google Trends — single fetch, reused for interest + convergence ---
-    trends_scores = None
-    try:
-        from trends import fetch_trends
-        from config import SEED_KEYWORDS, VENUE_SEARCH_KEYWORDS
-        all_kw = list(SEED_KEYWORDS[:3])
-        for vtype_kws in VENUE_SEARCH_KEYWORDS.values():
-            all_kw.append(vtype_kws[0])  # Just top keyword per type
-        all_kw = list(dict.fromkeys(all_kw))[:10]  # 2 batches max = ~3s
-        trends_scores = fetch_trends(keywords=all_kw)
-        if trends_scores:
-            signals["trends_interest"] = trends_scores
-    except Exception:
-        pass
+    # --- 1. Google Trends — SKIPPED in background collection ---
+    # pytrends is too slow (3-10s) and unreliable. Trends data is fetched
+    # on-demand via /trends endpoint with file caching instead.
+    # The drift function works well with time profiles + other signals.
 
-    # --- 2. Search convergence by venue type (from same trends data) ---
-    if trends_scores:
-        try:
-            venue_type_scores = {}
-            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
-                matching = [trends_scores.get(kw, 0) for kw in kws if kw in trends_scores]
-                if matching:
-                    venue_type_scores[vtype] = sum(matching) / len(matching)
-            if venue_type_scores:
-                signals["search_convergence_by_type"] = venue_type_scores
-        except Exception:
-            pass
+    # --- 2. Search convergence — not needed without trends data ---
 
     # --- 3. Weather ---
     try:
