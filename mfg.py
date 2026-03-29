@@ -751,7 +751,6 @@ def collect_signals() -> dict:
         "trends_interest": None,
         "weather": None,
         "events": None,
-        "reddit_activity": None,
         "search_convergence_by_type": None,
         "transit_stops": None,
         "crime_data": None,
@@ -810,25 +809,7 @@ def collect_signals() -> dict:
     except Exception as e:
         print(f"    [sig] events: {e}")
 
-    # --- 5. Reddit social buzz ---
-    try:
-        from livefeed import fetch_reddit_feed
-        posts = fetch_reddit_feed(limit=10)
-        if posts:
-            avg_score = sum(p.get("score", 0) for p in posts) / len(posts)
-            titles = " ".join(p.get("title", "") for p in posts).lower()
-            buzz_types = set()
-            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
-                if any(kw.lower() in titles for kw in kws[:3]):
-                    buzz_types.add(vtype)
-            signals["reddit_activity"] = {
-                "avg_score": avg_score,
-                "post_count": len(posts),
-                "buzz_types": list(buzz_types),
-            }
-            print(f"    [sig] reddit: {len(posts)} posts, avg={avg_score:.0f}")
-    except Exception as e:
-        print(f"    [sig] reddit: {e}")
+    # --- 5. Reddit — removed (rate limited on Fly.io) ---
 
     # --- 6. Transit stop density ---
     try:
