@@ -494,18 +494,19 @@ def build_heatmap_data(spots, hour=None, day_of_week=None):
 
     # --- Primary: BTUT density field (continuous, much richer) ---
     try:
-        from mfg import get_mfg_engine, collect_signals
+        import mfg as mfg_module
         osm_venues = fetch_nearby_places()
         if osm_venues:
-            engine = get_mfg_engine(osm_venues)
-            signals = collect_signals()
+            engine = mfg_module.get_mfg_engine(osm_venues)
+            # Use cached signals (instant) — don't block on API calls
+            signals = mfg_module._signals_cache.get("latest") or {}
             day = day_of_week if day_of_week is not None else datetime.now().weekday()
             result = engine.solve_hour(hour, day, signals)
             heatmap = engine.density_to_heatmap(result["density_field"])
             if heatmap:
                 return heatmap
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [!] MFG heatmap error: {e}")
 
     # --- Fallback: venue-based interpolation ---
     heatmap_points = []
