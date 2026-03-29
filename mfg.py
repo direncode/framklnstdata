@@ -752,10 +752,10 @@ def collect_signals() -> dict:
         "weather": None,
         "events": None,
         "search_convergence_by_type": None,
-        "transit_stops": None,
-        "crime_data": None,
-        "news_keywords": None,
-        "demographics": None,
+        "transit_stops": None,      # Always populated (built-in stops)
+        "crime_data": None,         # ArcGIS (may be empty)
+        "news_keywords": None,      # Derived from UNC events
+        "demographics": None,       # Always populated (hardcoded ACS)
     }
 
     # --- 1. Google Trends (writes to file cache — instant on subsequent calls) ---
@@ -811,15 +811,27 @@ def collect_signals() -> dict:
 
     # --- 5. Reddit — removed (rate limited on Fly.io) ---
 
-    # --- 6. Transit stop density ---
-    try:
-        from osint import fetch_transit_stops
-        stops = fetch_transit_stops()
-        if stops:
-            signals["transit_stops"] = stops
-            print(f"    [sig] transit: {len(stops)} stops")
-    except Exception as e:
-        print(f"    [sig] transit: {e}")
+    # --- 6. Transit stop density (hardcoded Chapel Hill major stops) ---
+    # Overpass API gets rate limited when queried alongside venue discovery.
+    # Chapel Hill Transit stops don't change — use known locations.
+    signals["transit_stops"] = [
+        {"stop_name": "Franklin St @ Columbia", "lat": 35.9133, "lon": -79.0540},
+        {"stop_name": "Franklin St @ Church", "lat": 35.9130, "lon": -79.0560},
+        {"stop_name": "Franklin St @ Henderson", "lat": 35.9128, "lon": -79.0575},
+        {"stop_name": "Franklin St @ Merritt Mill", "lat": 35.9126, "lon": -79.0590},
+        {"stop_name": "UNC Hospitals", "lat": 35.9065, "lon": -79.0510},
+        {"stop_name": "South Rd @ Stadium Dr", "lat": 35.9050, "lon": -79.0470},
+        {"stop_name": "Manning Dr @ UNC Hospitals", "lat": 35.9060, "lon": -79.0530},
+        {"stop_name": "Rosemary St @ Columbia", "lat": 35.9145, "lon": -79.0542},
+        {"stop_name": "Carrboro Plaza", "lat": 35.9110, "lon": -79.0720},
+        {"stop_name": "Weaver St @ Greensboro", "lat": 35.9115, "lon": -79.0700},
+        {"stop_name": "Estes Dr @ Airport Rd", "lat": 35.9270, "lon": -79.0560},
+        {"stop_name": "MLK Jr Blvd @ Estes", "lat": 35.9250, "lon": -79.0600},
+        {"stop_name": "Eubanks Park & Ride", "lat": 35.9550, "lon": -79.0650},
+        {"stop_name": "Jones Ferry @ Main St", "lat": 35.9100, "lon": -79.0770},
+        {"stop_name": "NC 54 @ Fordham Blvd", "lat": 35.9190, "lon": -79.0210},
+    ]
+    print(f"    [sig] transit: {len(signals['transit_stops'])} stops (built-in)")
 
     # --- 7. Crime/incident data ---
     try:
@@ -828,23 +840,26 @@ def collect_signals() -> dict:
         if crimes:
             signals["crime_data"] = crimes
             print(f"    [sig] crime: {len(crimes)} incidents")
+        else:
+            print("    [sig] crime: no data returned (ArcGIS may be empty)")
     except Exception as e:
         print(f"    [sig] crime: {e}")
 
-    # --- 8. Daily Tar Heel headlines ---
+    # --- 8. UNC news (from events, since DTH blocks server requests) ---
+    # DTH returns 403/405 from Fly.io. Use UNC events titles as news proxy.
     try:
-        from livefeed import fetch_dth_feed
-        articles = fetch_dth_feed()
-        if articles:
-            all_titles = " ".join(a.get("title", "") for a in articles).lower()
+        if signals.get("events"):
+            event_titles = " ".join(e.get("title", "") for e in signals["events"]).lower()
             news_kw = {}
             for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
-                hits = sum(1 for kw in kws if kw.lower() in all_titles)
+                hits = sum(1 for kw in kws if kw.lower() in event_titles)
                 if hits > 0:
-                    news_kw[vtype] = min(hits * 20, 100)
+                    news_kw[vtype] = min(hits * 25, 100)
             if news_kw:
                 signals["news_keywords"] = news_kw
-            print(f"    [sig] news: {len(articles)} articles")
+                print(f"    [sig] news: {len(news_kw)} types from events")
+            else:
+                print("    [sig] news: no venue-type matches in events")
     except Exception as e:
         print(f"    [sig] news: {e}")
 
