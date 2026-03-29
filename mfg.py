@@ -21,6 +21,7 @@ References:
 """
 
 import math
+import threading
 import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -883,6 +884,7 @@ _engine_venue_count: int = 0
 
 # Signals cache — populated by background thread, read by fast path
 _signals_cache: dict = {}
+_signals_lock = threading.Lock()
 _signals_collecting: bool = False
 
 

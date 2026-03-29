@@ -360,16 +360,7 @@ def fetch_place_busyness(place_id):
 
 
 def get_current_busyness(place_name, place_id=None, hour=None):
-    """
-    Get the busyness score (0-100) for a venue at a specific hour.
-    Returns None if no live data available.
-    """
-    if hour is None:
-        hour = datetime.now().hour
-
-    hourly = fetch_popular_times(place_name, place_id)
-    if hourly and 0 <= hour < 24:
-        return hourly[hour]
+    """Legacy stub — busyness now comes from BTUT MFG engine."""
     return None
 
 
@@ -557,22 +548,5 @@ def _nearest_weight(lat, lon, venue_weights):
 # ---------------------------------------------------------------------------
 
 def aggregate_busyness(spots, hour=None):
-    """
-    Enrich spots list with live busyness data.
-    Adds 'live_busyness' (0-100) and 'hourly_profile' (24-element list)
-    to each spot dict. Returns the enriched list.
-    """
-    if hour is None:
-        hour = datetime.now().hour
-
-    for spot in spots:
-        # Get full 24-hour profile (None if no API key)
-        hourly = fetch_popular_times(spot["name"], spot.get("place_id"))
-        spot["hourly_profile"] = hourly  # None if unavailable
-
-        # Get current busyness (None if no API key)
-        spot["live_busyness"] = get_current_busyness(
-            spot["name"], spot.get("place_id"), hour=hour
-        )
-
+    """Legacy stub — busyness now comes from BTUT MFG engine."""
     return spots

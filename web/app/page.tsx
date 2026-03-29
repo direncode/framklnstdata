@@ -161,6 +161,22 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
+      {/* Loading overlay */}
+      {loading && venues.length === 0 && (
+        <div className="fixed inset-0 z-50 bg-[#0a0b0f] flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-2xl font-mono text-[#00d4aa] mb-3 animate-pulse">
+              ███ FRANKLIN STREET DATA ███
+            </div>
+            <div className="text-sm font-mono text-[#454a58]">
+              Connecting to BTUT Mean-Field Game Engine...
+            </div>
+            <div className="mt-4 w-48 h-0.5 bg-[#1e2028] rounded-full overflow-hidden mx-auto">
+              <div className="h-full bg-[#00d4aa] rounded-full animate-[loading_2s_ease-in-out_infinite]" style={{width: "60%"}} />
+            </div>
+          </div>
+        </div>
+      )}
       <TopBar />
 
       <div className="flex-1 flex overflow-hidden">

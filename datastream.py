@@ -307,14 +307,34 @@ def handle_venues():
 
 
 def handle_trends(params):
-    """Current trends and trivia suggestions."""
+    """Current trends and trivia suggestions. Cache-first for speed."""
     live = params.get("live", ["false"])[0].lower() == "true"
     area = params.get("area", [None])[0]
 
+    trends_report = None
     if live:
-        trends_report = build_trends_report(area=area)
-    else:
-        trends_report = None
+        # Try cached signals first (instant)
+        try:
+            import mfg as mfg_module
+            cached_trends = (mfg_module._signals_cache.get("latest") or {}).get("trends_interest")
+            if cached_trends:
+                trends_report = {
+                    "geo": DEFAULT_GEO,
+                    "geo_description": "Chapel Hill / Triangle NC",
+                    "interest_scores": cached_trends,
+                    "rising_queries": {},
+                    "rising_topics": {},
+                    "interest_by_city": {},
+                    "trending_now": [],
+                    "realtime": [],
+                    "locally_relevant": [],
+                }
+        except Exception:
+            pass
+
+        # Fall back to full report only if no cache
+        if trends_report is None:
+            trends_report = build_trends_report(area=area)
 
     suggestions, has_data = generate_trivia_suggestions(trends_report)
 
@@ -472,15 +492,15 @@ def handle_forecast(params):
 
 
 def handle_density(params):
-    """BTUT density field and convergence diagnostics."""
+    """BTUT density field and convergence diagnostics. Cache-first."""
     hour = _parse_hour(params.get("hour", [None])[0])
 
     try:
-        from mfg import get_mfg_engine, collect_signals
+        import mfg as mfg_module
 
         venues = fetch_nearby_places()
-        engine = get_mfg_engine(venues)
-        signals = collect_signals()
+        engine = mfg_module.get_mfg_engine(venues)
+        signals = mfg_module._signals_cache.get("latest") or {}
         day = datetime.now().weekday()
         result = engine.solve_hour(hour, day, signals)
 
@@ -512,30 +532,57 @@ def handle_density(params):
 
 
 def handle_convergence(params):
-    """Search-to-venue convergence analysis.
-
-    Shows how current Google Trends search trajectories map onto
-    venue locations — predicting WHERE foot traffic will flow
-    based on what people are searching for NOW.
-    """
+    """Search-to-venue convergence analysis. Cache-first — no API blocking."""
     hour = _parse_hour(params.get("hour", [None])[0])
-    area = params.get("area", [None])[0]
 
     try:
-        from trends import compute_search_convergence
+        import mfg as mfg_module
+        from config import MFG_VENUE_PROFILES
 
+        signals = mfg_module._signals_cache.get("latest") or {}
+        conv_by_type = signals.get("search_convergence_by_type") or {}
+
+        if not conv_by_type:
+            return {
+                "engine": "BTUT Search Convergence",
+                "hour": hour,
+                "status": "warming_up",
+                "message": "Collecting search signals in background...",
+                "venue_scores": {},
+                "top_searches": [],
+                "heatmap": [],
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        # Build per-venue scores from type-level convergence
         venues = fetch_nearby_places()
-        result = compute_search_convergence(venues, hour=hour, area=area)
+        venue_scores = {}
+        heatmap = []
+        for v in venues:
+            vtype = v.get("amenity_type", "unknown").lower()
+            score = int(conv_by_type.get(vtype, 0))
+            # Time modulate
+            profile = MFG_VENUE_PROFILES.get(vtype, {})
+            if isinstance(profile, list) and len(profile) > hour:
+                score = int(score * profile[hour] / 100.0)
+            venue_scores[v["name"]] = max(0, min(100, score))
+            if score > 5:
+                max_s = max(conv_by_type.values()) if conv_by_type else 1
+                heatmap.append([v["lat"], v["lon"], score / max_s])
+
+        top_searches = [
+            {"venue_type": vt, "score": int(s)}
+            for vt, s in sorted(conv_by_type.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
 
         return {
             "engine": "BTUT Search Convergence",
             "hour": hour,
-            "area": area or "chapel_hill",
-            "venue_count": len(result.get("venue_scores", {})),
-            "venues_with_signal": sum(1 for s in result.get("venue_scores", {}).values() if s > 0),
-            "venue_scores": result.get("venue_scores", {}),
-            "top_searches": result.get("top_searches", []),
-            "heatmap": result.get("heatmap", []),
+            "venue_count": len(venue_scores),
+            "venues_with_signal": sum(1 for s in venue_scores.values() if s > 0),
+            "venue_scores": venue_scores,
+            "top_searches": top_searches,
+            "heatmap": heatmap,
             "timestamp": datetime.now().isoformat(),
         }
     except Exception as e:

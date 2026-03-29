@@ -74,8 +74,13 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
         return None
 
     results = {}
+    start_time = time.time()
+    MAX_TIME = 8  # Hard ceiling: return whatever we have after 8 seconds
 
     for i in range(0, len(keywords), 5):
+        if time.time() - start_time > MAX_TIME:
+            print(f"  [!] Trends timeout ({MAX_TIME}s), returning {len(results)} keywords")
+            break
         batch = keywords[i : i + 5]
         try:
             pytrends.build_payload(batch, cat=0, timeframe=timeframe, geo=geo)
@@ -85,11 +90,10 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
                     if kw in data.columns:
                         results[kw] = int(data[kw].mean())
             if i + 5 < len(keywords):
-                time.sleep(1)  # Reduced from 2s
+                time.sleep(1)
         except Exception as e:
             print(f"  [!] Trends API error for {batch}: {e}")
-            time.sleep(2)
-            continue
+            break  # Don't retry — return what we have
 
     # Cache results
     if results:
