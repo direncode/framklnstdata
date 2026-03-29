@@ -223,6 +223,7 @@ def handle_spots(params):
                 "takeaway": s.get("takeaway", ""),
                 "delivery": s.get("delivery", ""),
                 "closed": s.get("closed", False),
+                "signals": s.get("signals", {}),
             }
             for i, s in enumerate(spots)
         ],
@@ -278,33 +279,17 @@ def handle_traffic(params):
 
 
 def handle_heatmap(params):
-    """Heat map data as GeoJSON-compatible points."""
+    """Heat map data as array of [lat, lon, weight] points."""
     hour = _parse_hour(params.get("hour", [None])[0])
     day = _parse_day(params.get("day", [None])[0])
 
-    spots = get_enriched_spots(hour=hour, top_n=10)
+    spots = get_enriched_spots(hour=hour, top_n=500)
     points = build_heatmap_data(spots, hour=hour, day_of_week=day)
 
-    # Convert to GeoJSON FeatureCollection
-    features = []
-    for pt in points:
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [pt[1], pt[0]],  # GeoJSON is [lon, lat]
-            },
-            "properties": {
-                "weight": pt[2],
-                "intensity": round(pt[2] * 100, 1),
-            },
-        })
-
     return {
-        "type": "FeatureCollection",
+        "heatmap": points,
+        "point_count": len(points),
         "query": {"hour": hour, "day_of_week": day},
-        "features": features,
-        "point_count": len(features),
         "timestamp": datetime.now().isoformat(),
     }
 

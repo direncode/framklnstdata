@@ -26,6 +26,7 @@ interface Venue {
   opening_hours?: string;
   outdoor_seating?: string;
   brand?: string;
+  signals?: Record<string, string>;
 }
 
 interface TrendsData {

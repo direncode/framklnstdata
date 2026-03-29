@@ -29,7 +29,7 @@ _bg_signals_started = False
 
 def _start_background_signals():
     """Kick off signal collection in background thread.
-    Results are cached in mfg._signals_cache for next request."""
+    Results stored in mfg._signals_cache (shared mutable dict)."""
     global _bg_signals_started
     if _bg_signals_started:
         return
@@ -38,10 +38,10 @@ def _start_background_signals():
     def _collect():
         global _bg_signals_started
         try:
-            from mfg import collect_signals, _signals_cache
+            import mfg
             print("  [*] Background: collecting live signals...")
-            signals = collect_signals()
-            _signals_cache["latest"] = signals
+            signals = mfg.collect_signals()
+            mfg._signals_cache["latest"] = signals  # Write to module-level dict
             active = sum(1 for v in signals.values() if v is not None)
             print(f"  [+] Background: {active} signals ready")
         except Exception as e:
@@ -102,7 +102,8 @@ def _haversine(lat1, lon1, lat2, lon2):
 # ---------------------------------------------------------------------------
 
 def _build_venue(i, place, busyness=None, hourly_profile=None,
-                  busyness_source=None, nash_gap=None, closed=False):
+                  busyness_source=None, nash_gap=None, closed=False,
+                  signals_breakdown=None):
     """Build a venue dict with full OSM metadata pass-through."""
     return {
         "id": i + 1,
@@ -116,6 +117,7 @@ def _build_venue(i, place, busyness=None, hourly_profile=None,
         "busyness_source": busyness_source,
         "nash_gap": nash_gap,
         "closed": closed,
+        "signals": signals_breakdown or {},
         # Rich metadata from OSM
         "cuisine": place.get("cuisine", ""),
         "opening_hours": place.get("opening_hours", ""),
@@ -169,12 +171,12 @@ def get_venues_with_busyness(hour=None, radius_meters=None):
     # Signals (trends, weather, events) are collected in background and
     # cached for subsequent requests. This makes first response instant.
     try:
-        from mfg import get_mfg_engine, collect_signals, _signals_cache
+        import mfg as mfg_module
 
-        engine = get_mfg_engine(osm_venues)
+        engine = mfg_module.get_mfg_engine(osm_venues)
 
         # Use cached signals if available, otherwise empty (instant)
-        signals = _signals_cache.get("latest") or {}
+        signals = mfg_module._signals_cache.get("latest") or {}
         if not signals:
             print(f"  [*] BTUT: fast solve (time profiles only, hour={hour})")
         else:
@@ -196,10 +198,11 @@ def get_venues_with_busyness(hour=None, radius_meters=None):
             venues.append(_build_venue(
                 i, place,
                 busyness=vb.get("busyness"),
-                hourly_profile=None,  # Skip 24h on fast path
+                hourly_profile=None,
                 busyness_source="btut_mfg",
                 nash_gap=nash_gap,
                 closed=vb.get("closed", False),
+                signals_breakdown=vb.get("signals"),
             ))
 
         # Kick off background signal collection for next request

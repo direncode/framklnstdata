@@ -16,6 +16,7 @@ interface Venue {
   outdoor_seating?: string;
   brand?: string;
   closed?: boolean;
+  signals?: Record<string, string>;
 }
 
 function BusynessBar({ value }: { value: number }) {
@@ -174,6 +175,28 @@ export default function VenuePanel({
                   >
                     {v.website.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}
                   </a>
+                )}
+
+                {/* Signal breakdown — WHY this score */}
+                {v.signals && Object.keys(v.signals).length > 0 && (
+                  <div>
+                    <div className="text-[9px] text-[#454a58] font-mono mb-1 uppercase tracking-wider">Signal Analysis</div>
+                    <div className="space-y-0.5">
+                      {Object.entries(v.signals).map(([key, val]) => (
+                        <div key={key} className="flex items-start gap-1.5 text-[9px]">
+                          <span className={`shrink-0 mt-0.5 w-1 h-1 rounded-full ${
+                            key === "status" ? (val === "OPEN" ? "bg-[#00d4aa]" : "bg-[#ff4d6a]") :
+                            key === "weather" ? "bg-[#4a9eff]" :
+                            key === "search_convergence" ? "bg-[#a050ff]" :
+                            key === "events" ? "bg-[#ffaa00]" :
+                            key === "reddit" ? "bg-[#ff6600]" :
+                            "bg-[#454a58]"
+                          }`} />
+                          <span className="text-[#6b7080]">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {/* 24h profile */}

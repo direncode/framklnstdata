@@ -17,6 +17,7 @@ interface Venue {
   website?: string;
   opening_hours?: string;
   outdoor_seating?: string;
+  signals?: Record<string, string>;
 }
 
 interface HeatmapPoint {
@@ -266,7 +267,14 @@ export default function MapView({
           v.busyness != null && v.busyness > 0 ? `${v.busyness}% busy` : "no traffic data";
         const cuisine = v.cuisine ? `<div style="color: #6b7080;">${v.cuisine}</div>` : "";
         const address = v.address ? `<div style="color: #454a58; margin-top: 2px;">${v.address}</div>` : "";
-        const category = v.category ? `<div style="color: #454a58; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; margin-top: 3px;">${v.category}</div>` : "";
+
+        // Signal reasons for popup
+        const sigs = (v as any).signals || {};
+        const sigLines = Object.entries(sigs)
+          .filter(([k]) => k !== "status")
+          .slice(0, 3)
+          .map(([, val]) => `<div style="color: #6b7080; font-size: 9px;">· ${val}</div>`)
+          .join("");
 
         popupRef.current = new maplibregl.Popup({
           offset: size / 2 + 6,
@@ -275,11 +283,12 @@ export default function MapView({
         })
           .setLngLat([v.lon, v.lat])
           .setHTML(
-            `<div style="font-family: monospace; font-size: 11px; padding: 4px; max-width: 220px;">
+            `<div style="font-family: monospace; font-size: 11px; padding: 4px; max-width: 260px;">
               <div style="color: ${color}; font-weight: bold;">${v.name}</div>
               <div style="color: ${isClosed ? '#ff4d6a' : '#6b7080'}; margin-top: 2px;">${busynessText}</div>
               <div style="color: #6b7080;">${v.amenity_type}</div>
-              ${cuisine}${address}${category}
+              ${cuisine}${address}
+              ${sigLines ? `<div style="margin-top: 4px; border-top: 1px solid #2a2d38; padding-top: 3px;">${sigLines}</div>` : ""}
             </div>`
           )
           .addTo(map);

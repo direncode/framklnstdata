@@ -29,18 +29,24 @@ CHAPEL_HILL_BOUNDS = {
     "east": -79.0100,
 }
 
-# Waypoints along Franklin Street for heat map interpolation
-# These define the "spine" of the street for continuous heat mapping
+# Waypoints along the full Franklin Street → Carrboro corridor
+# Extends from campus edge east through West Franklin into Carrboro
 FRANKLIN_STREET_SPINE = [
-    (35.9126, -79.0590),  # West end near Merritt Mill
-    (35.9128, -79.0575),  # Near Linda's / West Franklin
-    (35.9130, -79.0562),  # TOPO area
-    (35.9131, -79.0555),  # Bandidos area
-    (35.9132, -79.0548),  # He's Not Here area
-    (35.9133, -79.0540),  # Columbia St intersection
-    (35.9134, -79.0530),  # East Franklin
+    (35.9136, -79.0510),  # East end — near campus edge
     (35.9135, -79.0520),  # Approaching campus
-    (35.9136, -79.0510),  # Near campus edge
+    (35.9134, -79.0530),  # East Franklin
+    (35.9133, -79.0540),  # Columbia St intersection
+    (35.9132, -79.0548),  # He's Not Here area
+    (35.9131, -79.0555),  # Bandidos area
+    (35.9130, -79.0562),  # TOPO area
+    (35.9128, -79.0575),  # Near Linda's / West Franklin
+    (35.9126, -79.0590),  # Merritt Mill intersection
+    (35.9124, -79.0610),  # West Franklin corridor
+    (35.9122, -79.0630),  # Approaching Carrboro
+    (35.9120, -79.0650),  # Carrboro town line
+    (35.9118, -79.0670),  # Main St Carrboro area
+    (35.9115, -79.0695),  # Weaver St Market area
+    (35.9112, -79.0720),  # West Carrboro
 ]
 
 # ---------------------------------------------------------------------------
@@ -218,6 +224,25 @@ MFG_VENUE_PROFILES = {
 
 # Day-of-week multipliers (Mon=0 through Sun=6)
 MFG_DAY_MULTIPLIERS = [0.5, 0.5, 0.6, 0.7, 0.9, 1.0, 0.8]
+
+# Fallback operating hours when OSM opening_hours is missing
+# Format: (open_hour, close_hour) — used to zero out busyness for closed venues
+MFG_FALLBACK_HOURS = {
+    "bar":          (16, 2),   # 4pm - 2am
+    "nightclub":    (21, 3),   # 9pm - 3am
+    "pub":          (11, 2),   # 11am - 2am
+    "restaurant":   (7, 23),   # 7am - 11pm
+    "cafe":         (6, 20),   # 6am - 8pm
+    "fast_food":    (6, 24),   # 6am - midnight
+    "pharmacy":     (8, 21),   # 8am - 9pm
+    "bank":         (9, 17),   # 9am - 5pm
+    "supermarket":  (7, 22),   # 7am - 10pm
+    "cinema":       (10, 24),  # 10am - midnight
+    "fitness_centre": (5, 22), # 5am - 10pm
+    "hotel":        (0, 24),   # 24/7
+    "library":      (8, 22),   # 8am - 10pm
+    "shop":         (9, 21),   # 9am - 9pm
+}
 
 # ---------------------------------------------------------------------------
 # Local Relevance Filtering

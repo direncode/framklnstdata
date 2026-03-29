@@ -33,6 +33,7 @@ from config import (
     MFG_SIGNAL_WEIGHTS,
     MFG_VENUE_PROFILES,
     MFG_DAY_MULTIPLIERS,
+    MFG_FALLBACK_HOURS,
     CACHE_DIR,
 )
 
@@ -241,7 +242,18 @@ class FranklinStreetMFG:
             name = v["name"]
             raw_type = v.get("amenity_type", "restaurant")
             self.venue_types[name] = self._normalize_type(raw_type)
-            self.venue_hours[name] = parse_opening_hours(v.get("opening_hours", ""))
+            parsed = parse_opening_hours(v.get("opening_hours", ""))
+            if parsed is None:
+                # Fallback: use typical hours for this venue type
+                ntype = self._normalize_type(raw_type)
+                fallback = MFG_FALLBACK_HOURS.get(ntype)
+                if fallback:
+                    open_h, close_h = fallback
+                    if close_h > open_h:
+                        parsed = lambda day, hour, o=open_h, c=close_h: o <= hour < c
+                    else:
+                        parsed = lambda day, hour, o=open_h, c=close_h: hour >= o or hour < c
+            self.venue_hours[name] = parsed
 
             idx = self._nearest_grid_index(v["lat"], v["lon"])
             dist = _haversine(v["lat"], v["lon"],
@@ -516,6 +528,11 @@ class FranklinStreetMFG:
         # Extract venue busyness from density
         venue_busyness = self._density_to_venue_busyness(rho, hour, day, signals)
 
+        # Build signal breakdown per venue (for frontend transparency)
+        signal_breakdown = self._compute_signal_breakdown(hour, day, signals)
+        for name in venue_busyness:
+            venue_busyness[name]["signals"] = signal_breakdown.get(name, {})
+
         return {
             "density_field": rho,
             "venue_busyness": venue_busyness,
@@ -630,6 +647,68 @@ class FranklinStreetMFG:
             ))
             busyness = max(0, min(100, busyness))
             result[name] = {"busyness": busyness}
+
+        return result
+
+    def _compute_signal_breakdown(self, hour, day, signals):
+        """Compute human-readable signal breakdown per venue.
+
+        Returns {venue_name: {signal_name: description}} for transparency.
+        """
+        if not signals:
+            return {}
+
+        result = {}
+        conv_by_type = signals.get("search_convergence_by_type") or {}
+        news_kw = signals.get("news_keywords") or {}
+        reddit = signals.get("reddit_activity") or {}
+        buzz_types = set(reddit.get("buzz_types", []))
+        weather = signals.get("weather") or {}
+        events = signals.get("events")
+        event_count = len(events) if isinstance(events, list) else 0
+        day_mult = MFG_DAY_MULTIPLIERS[day % 7] if day is not None else 0.7
+
+        all_names = list(self.venue_indices.keys()) + list(self.off_spine_venues.keys())
+        for name in all_names:
+            reasons = {}
+            vtype = self.venue_types.get(name, "restaurant")
+            profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES.get("restaurant", [50]*24))
+            time_val = profile[hour % 24]
+
+            reasons["time_profile"] = f"{vtype} at {hour}:00 → {time_val}% typical"
+
+            if day_mult < 0.7:
+                reasons["day_of_week"] = f"Weekday dampening ({int(day_mult*100)}%)"
+            elif day_mult >= 0.9:
+                reasons["day_of_week"] = f"Weekend boost ({int(day_mult*100)}%)"
+
+            if weather.get("is_good_flyering_weather") is False:
+                desc = weather.get("description", "bad weather")
+                reasons["weather"] = f"Bad weather: {desc} → reduced traffic"
+            elif weather.get("description"):
+                reasons["weather"] = f"{weather['description']}, {weather.get('temp_f', '?')}°F"
+
+            if event_count > 0:
+                reasons["events"] = f"{event_count} UNC events → {min(event_count*5, 100)}% surge"
+
+            conv = conv_by_type.get(vtype, 0)
+            if conv > 10:
+                reasons["search_convergence"] = f"'{vtype}' trending at {int(conv)}% interest"
+
+            if vtype in buzz_types:
+                reasons["reddit"] = f"Active Reddit discussion about {vtype} venues"
+
+            if vtype in news_kw:
+                reasons["news"] = f"Daily Tar Heel mentions {vtype} ({news_kw[vtype]}% match)"
+
+            # Check if closed
+            is_open_fn = self.venue_hours.get(name)
+            if is_open_fn and not is_open_fn(day if day is not None else 0, hour):
+                reasons["status"] = "CLOSED at this hour"
+            else:
+                reasons["status"] = "OPEN"
+
+            result[name] = reasons
 
         return result
 
