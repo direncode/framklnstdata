@@ -118,8 +118,9 @@ export default function MapView({
 
     // Add venue markers
     venues.forEach((v) => {
-      const color = busynessColor(v.busyness);
-      const size = v.busyness != null && v.busyness > 0 ? 14 + (v.busyness / 100) * 16 : 10;
+      const isClosed = (v as any).closed === true;
+      const color = isClosed ? "#333840" : busynessColor(v.busyness);
+      const size = isClosed ? 6 : (v.busyness != null && v.busyness > 0 ? 14 + (v.busyness / 100) * 16 : 10);
 
       // Create marker element — anchor wrapper ensures scale from center
       const wrapper = document.createElement("div");

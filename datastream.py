@@ -222,6 +222,7 @@ def handle_spots(params):
                 "wheelchair": s.get("wheelchair", ""),
                 "takeaway": s.get("takeaway", ""),
                 "delivery": s.get("delivery", ""),
+                "closed": s.get("closed", False),
             }
             for i, s in enumerate(spots)
         ],

@@ -97,6 +97,116 @@ def _haversine(lat1, lon1, lat2, lon2):
 
 
 # ---------------------------------------------------------------------------
+# Opening Hours Parser
+# ---------------------------------------------------------------------------
+
+# OSM day abbreviations → Python weekday (0=Mon)
+_OSM_DAYS = {"Mo": 0, "Tu": 1, "We": 2, "Th": 3, "Fr": 4, "Sa": 5, "Su": 6}
+
+
+def parse_opening_hours(hours_str):
+    """Parse OSM opening_hours into a lookup: (day, hour) -> open/closed.
+
+    Handles common formats:
+      "Mo-Fr 08:00-22:00"
+      "Mo-Fr 08:00-22:00; Sa-Su 10:00-23:00"
+      "Mo-Su 11:00-02:00"  (wraps past midnight)
+      "24/7"
+
+    Returns a function: is_open(day: int, hour: int) -> bool
+    Returns None if the string can't be parsed (treat as always open).
+    """
+    if not hours_str or not isinstance(hours_str, str):
+        return None
+
+    hours_str = hours_str.strip()
+    if hours_str == "24/7":
+        return lambda day, hour: True
+
+    schedule = {}  # (day, hour) -> True
+
+    try:
+        for rule in hours_str.split(";"):
+            rule = rule.strip()
+            if not rule:
+                continue
+
+            # Split "Mo-Fr 08:00-22:00" into day part and time part
+            parts = rule.split()
+            if len(parts) < 2:
+                continue
+
+            day_part = parts[0]
+            time_part = parts[1]
+
+            # Parse day range
+            days = _parse_day_range(day_part)
+            if not days:
+                continue
+
+            # Parse time range
+            open_h, close_h = _parse_time_range(time_part)
+            if open_h is None:
+                continue
+
+            # Mark hours as open
+            for d in days:
+                if close_h > open_h:
+                    for h in range(open_h, close_h):
+                        schedule[(d, h)] = True
+                else:
+                    # Wraps past midnight (e.g., 20:00-02:00)
+                    for h in range(open_h, 24):
+                        schedule[(d, h)] = True
+                    next_day = (d + 1) % 7
+                    for h in range(0, close_h):
+                        schedule[(next_day, h)] = True
+
+        if not schedule:
+            return None
+
+        return lambda day, hour: schedule.get((day % 7, hour % 24), False)
+
+    except Exception:
+        return None
+
+
+def _parse_day_range(day_str):
+    """Parse 'Mo-Fr' or 'Sa,Su' or 'Mo' into list of day ints."""
+    days = []
+    for part in day_str.split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = part.split("-", 1)
+            start_i = _OSM_DAYS.get(start.strip()[:2])
+            end_i = _OSM_DAYS.get(end.strip()[:2])
+            if start_i is not None and end_i is not None:
+                if end_i >= start_i:
+                    days.extend(range(start_i, end_i + 1))
+                else:
+                    days.extend(range(start_i, 7))
+                    days.extend(range(0, end_i + 1))
+        else:
+            d = _OSM_DAYS.get(part.strip()[:2])
+            if d is not None:
+                days.append(d)
+    return days
+
+
+def _parse_time_range(time_str):
+    """Parse '08:00-22:00' into (8, 22)."""
+    try:
+        if "-" not in time_str:
+            return None, None
+        start, end = time_str.split("-", 1)
+        open_h = int(start.split(":")[0])
+        close_h = int(end.split(":")[0])
+        return open_h, close_h
+    except (ValueError, IndexError):
+        return None, None
+
+
+# ---------------------------------------------------------------------------
 # BTUT Fokker-Planck Engine
 # ---------------------------------------------------------------------------
 
@@ -125,18 +235,21 @@ class FranklinStreetMFG:
         self.venue_indices = {}      # name -> grid index (on-spine venues)
         self.venue_types = {}        # name -> normalized type (all venues)
         self.off_spine_venues = {}   # name -> True (too far from spine)
+        self.venue_hours = {}        # name -> is_open(day, hour) function or None
 
         for v in venues:
+            name = v["name"]
             raw_type = v.get("amenity_type", "restaurant")
-            self.venue_types[v["name"]] = self._normalize_type(raw_type)
+            self.venue_types[name] = self._normalize_type(raw_type)
+            self.venue_hours[name] = parse_opening_hours(v.get("opening_hours", ""))
 
             idx = self._nearest_grid_index(v["lat"], v["lon"])
             dist = _haversine(v["lat"], v["lon"],
                               float(self.grid_lat[idx]), float(self.grid_lon[idx]))
             if dist <= 200:  # Within 200m of spine
-                self.venue_indices[v["name"]] = idx
+                self.venue_indices[name] = idx
             else:
-                self.off_spine_venues[v["name"]] = True
+                self.off_spine_venues[name] = True
 
     def _nearest_grid_index(self, lat: float, lon: float) -> int:
         dists = np.sqrt(
@@ -147,16 +260,40 @@ class FranklinStreetMFG:
     @staticmethod
     def _normalize_type(amenity_type: str) -> str:
         t = amenity_type.lower()
-        if "bar" in t:
+        if t in ("bar", "biergarten", "brewery", "wine_bar"):
             return "bar"
         if "night" in t or "club" in t:
             return "nightclub"
-        if "pub" in t:
+        if t == "pub":
             return "pub"
-        if "cafe" in t or "coffee" in t:
+        if t in ("cafe", "coffee", "tea"):
             return "cafe"
-        if "fast" in t:
+        if t in ("fast_food", "food_court"):
             return "fast_food"
+        if t in ("ice_cream",):
+            return "cafe"
+        if t in ("pharmacy", "dentist", "doctors", "clinic", "hospital", "veterinary"):
+            return "pharmacy"
+        if t in ("bank", "atm", "post_office"):
+            return "bank"
+        if t in ("supermarket", "convenience", "marketplace"):
+            return "supermarket"
+        if t in ("cinema", "theatre", "arts_centre", "museum", "gallery"):
+            return "cinema"
+        if t in ("fitness_centre", "sports_centre", "swimming_pool"):
+            return "fitness_centre"
+        if t in ("hotel", "motel", "guest_house", "hostel"):
+            return "hotel"
+        if t in ("library",):
+            return "library"
+        if t in ("clothes", "books", "electronics", "hardware", "florist",
+                 "beauty", "hairdresser", "tattoo", "bicycle", "sports",
+                 "outdoor", "gift", "jewelry", "optician", "department_store",
+                 "mall", "music", "bakery", "butcher", "deli", "greengrocer",
+                 "alcohol", "tobacco"):
+            return "shop"
+        if t == "restaurant":
+            return "restaurant"
         return "restaurant"
 
     # ----- Drift Velocity -----
@@ -200,6 +337,11 @@ class FranklinStreetMFG:
 
         # --- Component 1: Venue attraction + time profile ---
         for name, idx in self.venue_indices.items():
+            # Skip venues that are closed at this hour/day
+            is_open_fn = self.venue_hours.get(name)
+            if is_open_fn and not is_open_fn(day if day is not None else 0, hour):
+                continue
+
             vtype = self.venue_types.get(name, "restaurant")
             profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES["restaurant"])
             time_weight = profile[hour % 24] / 100.0
@@ -370,6 +512,12 @@ class FranklinStreetMFG:
         # --- On-spine venues: sample from density field ---
         raw_values = {}
         for name, idx in self.venue_indices.items():
+            # Check if venue is open
+            is_open_fn = self.venue_hours.get(name)
+            if is_open_fn and not is_open_fn(day, hour):
+                result[name] = {"busyness": 0, "closed": True}
+                continue
+
             lo = max(0, idx - 2)
             hi = min(self.n, idx + 3)
             raw_values[name] = float(np.mean(rho[lo:hi]))
@@ -395,6 +543,12 @@ class FranklinStreetMFG:
 
         conv_by_type = (signals or {}).get("search_convergence_by_type") or {}
         for name in self.off_spine_venues:
+            # Check if venue is open
+            is_open_fn = self.venue_hours.get(name)
+            if is_open_fn and not is_open_fn(day, hour):
+                result[name] = {"busyness": 0, "closed": True}
+                continue
+
             vtype = self.venue_types.get(name, "restaurant")
             profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES["restaurant"])
             base = profile[hour % 24] / 100.0

@@ -72,7 +72,7 @@ def _haversine(lat1, lon1, lat2, lon2):
 # ---------------------------------------------------------------------------
 
 def _build_venue(i, place, busyness=None, hourly_profile=None,
-                  busyness_source=None, nash_gap=None):
+                  busyness_source=None, nash_gap=None, closed=False):
     """Build a venue dict with full OSM metadata pass-through."""
     return {
         "id": i + 1,
@@ -85,6 +85,7 @@ def _build_venue(i, place, busyness=None, hourly_profile=None,
         "hourly_profile": hourly_profile,
         "busyness_source": busyness_source,
         "nash_gap": nash_gap,
+        "closed": closed,
         # Rich metadata from OSM
         "cuisine": place.get("cuisine", ""),
         "opening_hours": place.get("opening_hours", ""),
@@ -170,6 +171,7 @@ def get_venues_with_busyness(hour=None, radius_meters=None):
                 hourly_profile=profiles_24h.get(name),
                 busyness_source="btut_mfg",
                 nash_gap=nash_gap,
+                closed=vb.get("closed", False),
             ))
 
     except ImportError:

@@ -15,6 +15,7 @@ interface Venue {
   opening_hours?: string;
   outdoor_seating?: string;
   brand?: string;
+  closed?: boolean;
 }
 
 function BusynessBar({ value }: { value: number }) {
@@ -98,7 +99,9 @@ export default function VenuePanel({
           >
             <div className="flex items-center justify-between">
               <span className="text-sm text-[#e2e4e9] truncate max-w-[180px]">{v.name}</span>
-              {v.busyness != null && v.busyness > 0 ? (
+              {v.closed ? (
+                <span className="text-[10px] font-mono text-[#ff4d6a]">CLOSED</span>
+              ) : v.busyness != null && v.busyness > 0 ? (
                 <span
                   className="text-xs font-mono font-bold"
                   style={{
