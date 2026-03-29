@@ -38,6 +38,7 @@ import json
 import copy
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 from config import FRANKLIN_STREET_CENTER, FRANKLIN_STREET_BOUNDS, DEFAULT_GEO
@@ -579,8 +580,13 @@ def handle_export(params):
 # HTTP Server
 # ---------------------------------------------------------------------------
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Multi-threaded HTTP server — health checks don't block behind long requests."""
+    daemon_threads = True
+
+
 class DataHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the Franklin Street Data API API."""
+    """HTTP request handler for the Franklin Street Data API."""
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -634,18 +640,24 @@ class DataHandler(BaseHTTPRequestHandler):
                 "error": "Not found",
                 "available_endpoints": list(routes.keys()),
             }
-            self.send_response(404)
+            try:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps(result, indent=2, default=str).encode())
+            except BrokenPipeError:
+                pass
+            return
+
+        try:
+            self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result, indent=2, default=str).encode())
-            return
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(result, indent=2, default=str).encode())
+        except BrokenPipeError:
+            pass  # Client disconnected before response completed
 
     def log_message(self, format, *args):
         """Custom log format."""
@@ -697,7 +709,7 @@ if __name__ == "__main__":
 
     import signal
 
-    server = HTTPServer((args.host, args.port), DataHandler)
+    server = ThreadingHTTPServer((args.host, args.port), DataHandler)
 
     def graceful_shutdown(signum, frame):
         signame = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT"}.get(signum, str(signum))
