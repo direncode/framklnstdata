@@ -62,21 +62,23 @@ export default function Home() {
   const [selectedVenue, setSelectedVenue] = useState<string | null>(null);
   const [trends, setTrends] = useState<TrendsData | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showTraffic, setShowTraffic] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [trafficHeatmap, setTrafficHeatmap] = useState<HeatmapPoint[]>([]);
   const [searchHeatmap, setSearchHeatmap] = useState<HeatmapPoint[]>([]);
 
   const fetchVenues = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/spots?hour=${hour}`);
       if (res.ok) {
         const data = await res.json();
-        // Backend returns {spots: [...]} or {query: ..., spots: [...]}
         const list = data?.spots || data?.venues || (Array.isArray(data) ? data : []);
         if (list.length > 0) {
           setVenues(list);
           setApiConnected(true);
+          setLoading(false);
           return;
         }
       }
@@ -90,12 +92,14 @@ export default function Home() {
         if (list.length > 0) {
           setVenues(list);
           setApiConnected(true);
+          setLoading(false);
           return;
         }
       }
     } catch { /* empty */ }
     setVenues([]);
     setApiConnected(false);
+    setLoading(false);
   }, [hour]);
 
   const fetchTrends = useCallback(async () => {
@@ -301,11 +305,11 @@ export default function Home() {
               </div>
               <div className="metric-card">
                 <div className="text-[9px] text-[#454a58] uppercase">API Status</div>
-                <div className={`text-3xl font-mono mt-1 ${apiConnected ? "text-[#00d4aa]" : "text-[#ff4d6a]"}`}>
-                  {apiConnected ? "LIVE" : "OFFLINE"}
+                <div className={`text-3xl font-mono mt-1 ${apiConnected ? "text-[#00d4aa]" : loading ? "text-[#ffaa00]" : "text-[#ff4d6a]"}`}>
+                  {apiConnected ? "LIVE" : loading ? "..." : "OFFLINE"}
                 </div>
                 <div className="text-[10px] text-[#454a58] mt-1">
-                  {apiConnected ? "All feeds active" : "Set BACKEND_URL"}
+                  {apiConnected ? "All feeds active" : loading ? "Connecting to BTUT engine" : "Set BACKEND_URL"}
                 </div>
               </div>
             </div>

@@ -335,7 +335,47 @@ class FranklinStreetMFG:
         event_count = len(events) if isinstance(events, list) else 0
         event_surge = min(1.0 + event_count * 0.05, 2.0)  # Cap at 2x
 
-        # --- Component 1: Venue attraction + time profile ---
+        # Reddit social buzz — which venue types are being talked about
+        reddit = signals.get("reddit_activity") or {}
+        buzz_types = set(reddit.get("buzz_types", []))
+        reddit_score = min(reddit.get("avg_score", 0) / 100.0, 1.0)
+
+        # Transit stop positions → accessibility boost per grid cell
+        transit_boost = np.zeros(n)
+        transit_stops = signals.get("transit_stops")
+        if transit_stops and isinstance(transit_stops, list):
+            for stop in transit_stops:
+                slat = stop.get("lat") or stop.get("stop_lat")
+                slon = stop.get("lon") or stop.get("stop_lon")
+                if slat and slon:
+                    sidx = self._nearest_grid_index(float(slat), float(slon))
+                    lo = max(0, sidx - 5)
+                    hi = min(n, sidx + 6)
+                    transit_boost[lo:hi] += 0.1
+            transit_boost = np.minimum(transit_boost, 1.0)
+
+        # Crime data → safety damping per grid cell
+        crime_damping = np.ones(n)
+        crime_data = signals.get("crime_data")
+        if crime_data and isinstance(crime_data, list):
+            for incident in crime_data:
+                clat = incident.get("lat")
+                clon = incident.get("lon")
+                if clat and clon:
+                    cidx = self._nearest_grid_index(float(clat), float(clon))
+                    lo = max(0, cidx - 3)
+                    hi = min(n, cidx + 4)
+                    crime_damping[lo:hi] *= 0.95  # Each incident reduces by 5%
+            crime_damping = np.maximum(crime_damping, 0.5)  # Floor at 50%
+
+        # News keyword boost by venue type
+        news_kw = signals.get("news_keywords") or {}
+
+        # Demographics college multiplier
+        demo = signals.get("demographics") or {}
+        college_mult = demo.get("college_multiplier", 1.0)
+
+        # --- Component 1: Venue attraction + time profile + all signals ---
         for name, idx in self.venue_indices.items():
             # Skip venues that are closed at this hour/day
             is_open_fn = self.venue_hours.get(name)
@@ -349,7 +389,7 @@ class FranklinStreetMFG:
             # Base attraction strength
             attraction = w["venue_attraction"] * time_weight * w["time_profile"]
 
-            # Trends boost: check if any trending keyword relates to venue type
+            # Trends boost
             trends_boost = 0.0
             for kw, score in trends_interest.items():
                 kw_lower = kw.lower()
@@ -361,16 +401,34 @@ class FranklinStreetMFG:
                     trends_boost = max(trends_boost, score / 100.0)
             attraction += trends_boost * w["trends_boost"]
 
-            # Search convergence — trending searches pull density toward matching venue types
+            # Search convergence
             conv_by_type = signals.get("search_convergence_by_type") or {}
             conv_score = conv_by_type.get(vtype, 0) / 100.0
             if conv_score > 0:
                 attraction += conv_score * w.get("search_convergence", 0.25)
 
+            # Social buzz — Reddit mentions boost matching venue types
+            if vtype in buzz_types:
+                attraction += reddit_score * w.get("social_buzz", 0.1)
+
+            # News boost — DTH headlines mentioning this venue type
+            if vtype in news_kw:
+                attraction += (news_kw[vtype] / 100.0) * w.get("news_boost", 0.1)
+
+            # Transit accessibility boost at this grid position
+            attraction += transit_boost[idx] * w.get("transit_access", 0.15)
+
             # Apply day and weather modulation
             attraction *= day_mult * w["day_of_week"]
             attraction *= weather_factor * (1.0 + (1.0 - weather_factor) * w["weather_damping"])
             attraction *= event_surge * w["event_surge"] if event_count > 0 else 1.0
+
+            # Crime safety factor at this grid position
+            attraction *= crime_damping[idx] ** w.get("crime_damping", 0.1)
+
+            # Demographics college crowd boost (evening hours)
+            if hour >= 17 or hour <= 2:
+                attraction *= college_mult * w.get("demographics", 0.1)
 
             # Gaussian kernel pull toward this venue position
             grid_dists = (self.grid_dist - self.grid_dist[idx]) / (dx * 10 + 1e-8)
@@ -542,6 +600,13 @@ class FranklinStreetMFG:
                     weather_factor = 0.6
 
         conv_by_type = (signals or {}).get("search_convergence_by_type") or {}
+        news_kw = (signals or {}).get("news_keywords") or {}
+        reddit = (signals or {}).get("reddit_activity") or {}
+        buzz_types = set(reddit.get("buzz_types", []))
+        reddit_score = min(reddit.get("avg_score", 0) / 100.0, 1.0)
+        demo = (signals or {}).get("demographics") or {}
+        college_mult = demo.get("college_multiplier", 1.0)
+
         for name in self.off_spine_venues:
             # Check if venue is open
             is_open_fn = self.venue_hours.get(name)
@@ -552,9 +617,17 @@ class FranklinStreetMFG:
             vtype = self.venue_types.get(name, "restaurant")
             profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES["restaurant"])
             base = profile[hour % 24] / 100.0
-            # Search convergence boost for off-spine venues too
+
+            # Signal boosts for off-spine venues
             conv_boost = 1.0 + (conv_by_type.get(vtype, 0) / 100.0) * 0.3
-            busyness = int(round(base * day_mult * weather_factor * conv_boost * 100))
+            buzz_boost = 1.0 + (0.15 if vtype in buzz_types else 0) * reddit_score
+            news_boost = 1.0 + (news_kw.get(vtype, 0) / 100.0) * 0.15
+            evening_mult = college_mult if (hour >= 17 or hour <= 2) else 1.0
+
+            busyness = int(round(
+                base * day_mult * weather_factor * conv_boost
+                * buzz_boost * news_boost * evening_mult * 100
+            ))
             busyness = max(0, min(100, busyness))
             result[name] = {"busyness": busyness}
 
@@ -598,42 +671,42 @@ def collect_signals() -> dict:
         "weather": None,
         "events": None,
         "reddit_activity": None,
-        "search_convergence": None,
+        "search_convergence_by_type": None,
+        "transit_stops": None,
+        "crime_data": None,
+        "news_keywords": None,
+        "demographics": None,
     }
 
-    # Google Trends — single fetch, reused for both interest + convergence
+    # --- 1. Google Trends — single fetch, reused for interest + convergence ---
     trends_scores = None
     try:
         from trends import fetch_trends
         from config import SEED_KEYWORDS, VENUE_SEARCH_KEYWORDS
-        # Combine seed keywords + top 2 per venue type (deduplicated)
         all_kw = list(SEED_KEYWORDS[:5])
         for vtype_kws in VENUE_SEARCH_KEYWORDS.values():
             all_kw.extend(vtype_kws[:2])
-        all_kw = list(dict.fromkeys(all_kw))[:20]  # Cap at 20 (4 batches max)
-
+        all_kw = list(dict.fromkeys(all_kw))[:20]
         trends_scores = fetch_trends(keywords=all_kw)
         if trends_scores:
             signals["trends_interest"] = trends_scores
     except Exception:
         pass
 
-    # Search convergence — reuse already-fetched trends scores (no extra API call)
+    # --- 2. Search convergence by venue type (from same trends data) ---
     if trends_scores:
         try:
-            from config import MFG_VENUE_PROFILES
             venue_type_scores = {}
             for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
                 matching = [trends_scores.get(kw, 0) for kw in kws if kw in trends_scores]
                 if matching:
                     venue_type_scores[vtype] = sum(matching) / len(matching)
-
             if venue_type_scores:
                 signals["search_convergence_by_type"] = venue_type_scores
         except Exception:
             pass
 
-    # Weather
+    # --- 3. Weather ---
     try:
         from intel import fetch_weather
         weather = fetch_weather()
@@ -642,7 +715,7 @@ def collect_signals() -> dict:
     except Exception:
         pass
 
-    # UNC Events
+    # --- 4. UNC Events ---
     try:
         from intel import fetch_unc_events
         events = fetch_unc_events()
@@ -651,13 +724,71 @@ def collect_signals() -> dict:
     except Exception:
         pass
 
-    # Reddit activity (optional boost signal)
+    # --- 5. Reddit social buzz ---
     try:
         from livefeed import fetch_reddit_feed
         posts = fetch_reddit_feed(limit=10)
         if posts:
             avg_score = sum(p.get("score", 0) for p in posts) / len(posts)
-            signals["reddit_activity"] = {"avg_score": avg_score, "post_count": len(posts)}
+            # Extract mentioned venue types from post titles
+            titles = " ".join(p.get("title", "") for p in posts).lower()
+            buzz_types = set()
+            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
+                if any(kw.lower() in titles for kw in kws[:3]):
+                    buzz_types.add(vtype)
+            signals["reddit_activity"] = {
+                "avg_score": avg_score,
+                "post_count": len(posts),
+                "buzz_types": list(buzz_types),
+            }
+    except Exception:
+        pass
+
+    # --- 6. Transit stop density (pedestrian accessibility) ---
+    try:
+        from osint import fetch_transit_stops
+        stops = fetch_transit_stops()
+        if stops:
+            signals["transit_stops"] = stops
+    except Exception:
+        pass
+
+    # --- 7. Crime/incident data (safety factor) ---
+    try:
+        from osint import fetch_crime_data
+        crimes = fetch_crime_data()
+        if crimes:
+            signals["crime_data"] = crimes
+    except Exception:
+        pass
+
+    # --- 8. Daily Tar Heel headlines (news keyword boost) ---
+    try:
+        from livefeed import fetch_dth_feed
+        articles = fetch_dth_feed()
+        if articles:
+            # Extract keywords from headlines for venue matching
+            all_titles = " ".join(a.get("title", "") for a in articles).lower()
+            news_kw = {}
+            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
+                hits = sum(1 for kw in kws if kw.lower() in all_titles)
+                if hits > 0:
+                    news_kw[vtype] = min(hits * 20, 100)  # 0-100 score
+            if news_kw:
+                signals["news_keywords"] = news_kw
+    except Exception:
+        pass
+
+    # --- 9. Census demographics (college crowd multiplier) ---
+    try:
+        from intel import fetch_demographics
+        demo = fetch_demographics()
+        if demo:
+            pct_18_24 = demo.get("pct_18_24", 0)
+            signals["demographics"] = {
+                "pct_college_age": pct_18_24,
+                "college_multiplier": 1.0 + (pct_18_24 / 100.0) * 0.5,
+            }
     except Exception:
         pass
 

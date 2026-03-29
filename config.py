@@ -190,6 +190,11 @@ MFG_SIGNAL_WEIGHTS = {
     "event_surge": 0.25,               # UNC event proximity boost
     "day_of_week": 0.4,                # Weekend vs weekday multiplier
     "search_convergence": 0.25,        # Search trajectory → venue convergence
+    "transit_access": 0.15,            # Transit stop proximity boost
+    "crime_damping": 0.1,              # Crime incident safety suppression
+    "social_buzz": 0.1,                # Reddit social activity amplifier
+    "news_boost": 0.1,                 # Daily Tar Heel headline boost
+    "demographics": 0.1,               # College-age population multiplier
 }
 
 # Typical hourly activity profiles by venue type (0-100, index = hour 0-23)
