@@ -245,16 +245,20 @@ def fetch_related_topics(keyword, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     try:
         pytrends.build_payload([keyword], cat=0, timeframe=timeframe, geo=geo)
         related = pytrends.related_topics()
-        if keyword in related and related[keyword]["rising"] is not None:
+        if keyword in related and related[keyword].get("rising") is not None:
             df = related[keyword]["rising"]
             topics = []
             for _, row in df.head(8).iterrows():
-                topics.append({
-                    "title": row.get("topic_title", ""),
-                    "type": row.get("topic_type", ""),
-                    "value": int(row.get("value", 0)),
-                })
-            return topics
+                # Column names vary between pytrends versions
+                title = ""
+                for col in ["topic_title", "title", "topic"]:
+                    if col in row.index:
+                        title = str(row[col])
+                        break
+                if not title and len(row) > 0:
+                    title = str(row.iloc[0])
+                topics.append({"title": title, "value": 0})
+            return topics if topics else None
     except Exception as e:
         print(f"  [!] Related topics error for '{keyword}': {e}")
 
