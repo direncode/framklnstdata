@@ -8,8 +8,9 @@ import VenuePanel from "@/components/VenuePanel";
 import FeedView from "@/components/FeedView";
 import HourSlider from "@/components/HourSlider";
 import StatusBar from "@/components/StatusBar";
+import CommandPanel from "@/components/CommandPanel";
 
-type Tab = "map" | "feed" | "intel";
+type Tab = "map" | "feed" | "intel" | "command";
 
 interface Venue {
   name: string;
@@ -301,6 +302,10 @@ export default function Home() {
             interestByCity={trends?.interest_by_city || {}}
             geoDescription={trends?.geo_description || ""}
           />
+        )}
+
+        {tab === "command" && (
+          <CommandPanel hour={hour} />
         )}
 
         {tab === "intel" && (

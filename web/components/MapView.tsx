@@ -236,11 +236,14 @@ export default function MapView({
       const color = isClosed ? "#333840" : busynessColor(v.busyness);
       const size = isClosed ? 6 : (v.busyness != null && v.busyness > 0 ? 14 + (v.busyness / 100) * 16 : 10);
 
-      // Create marker element — anchor wrapper ensures scale from center
+      // Create marker element — fixed pixel size at all zoom levels
       const wrapper = document.createElement("div");
       wrapper.style.width = `${size}px`;
       wrapper.style.height = `${size}px`;
       wrapper.style.position = "relative";
+      wrapper.style.pointerEvents = "auto";
+      wrapper.style.willChange = "auto";
+      wrapper.style.transform = "none";
 
       const el = document.createElement("div");
       el.style.width = "100%";

@@ -1,9 +1,10 @@
 "use client";
 
-type Tab = "map" | "feed" | "intel";
+type Tab = "map" | "feed" | "intel" | "command";
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: "map", label: "SURVEILLANCE", icon: "◎" },
+  { id: "command", label: "COMMAND", icon: "⚡" },
   { id: "feed", label: "TRENDS", icon: "◈" },
   { id: "intel", label: "INTEL", icon: "◆" },
 ];
