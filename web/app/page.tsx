@@ -49,6 +49,12 @@ interface TrendsData {
 
 const API_BASE = "/api/data";
 
+interface HeatmapPoint {
+  lat: number;
+  lon: number;
+  weight: number;
+}
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>("map");
   const [hour, setHour] = useState(new Date().getHours());
@@ -56,6 +62,10 @@ export default function Home() {
   const [selectedVenue, setSelectedVenue] = useState<string | null>(null);
   const [trends, setTrends] = useState<TrendsData | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
+  const [showTraffic, setShowTraffic] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [trafficHeatmap, setTrafficHeatmap] = useState<HeatmapPoint[]>([]);
+  const [searchHeatmap, setSearchHeatmap] = useState<HeatmapPoint[]>([]);
 
   const fetchVenues = useCallback(async () => {
     try {
@@ -98,9 +108,45 @@ export default function Home() {
     } catch { /* empty */ }
   }, []);
 
+  const fetchHeatmaps = useCallback(async () => {
+    // Traffic heatmap from BTUT density field
+    if (showTraffic) {
+      try {
+        const res = await fetch(`${API_BASE}/heatmap?hour=${hour}`);
+        if (res.ok) {
+          const data = await res.json();
+          const points = data?.heatmap || (Array.isArray(data) ? data : []);
+          // Backend returns [[lat, lon, weight], ...] or {heatmap: [...]}
+          const mapped = points.map((p: number[] | HeatmapPoint) =>
+            Array.isArray(p) ? { lat: p[0], lon: p[1], weight: p[2] } : p
+          );
+          setTrafficHeatmap(mapped);
+        }
+      } catch { /* empty */ }
+    }
+    // Search convergence heatmap
+    if (showSearch) {
+      try {
+        const res = await fetch(`${API_BASE}/convergence?hour=${hour}`);
+        if (res.ok) {
+          const data = await res.json();
+          const points = data?.heatmap || [];
+          const mapped = points.map((p: number[] | HeatmapPoint) =>
+            Array.isArray(p) ? { lat: p[0], lon: p[1], weight: p[2] } : p
+          );
+          setSearchHeatmap(mapped);
+        }
+      } catch { /* empty */ }
+    }
+  }, [hour, showTraffic, showSearch]);
+
   useEffect(() => {
     fetchVenues();
   }, [fetchVenues]);
+
+  useEffect(() => {
+    fetchHeatmaps();
+  }, [fetchHeatmaps]);
 
   useEffect(() => {
     if (tab === "feed") fetchTrends();
@@ -147,6 +193,37 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Heatmap Layers */}
+              <div className="px-4 py-3 border-b border-[#1e2028]">
+                <div className="text-[10px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-2">
+                  Map Layers
+                </div>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowTraffic(!showTraffic)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showTraffic
+                        ? "bg-[#ff660020] text-[#ff6600] border border-[#ff660044]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showTraffic ? "bg-[#ff6600]" : "bg-[#1e2028]"}`} />
+                    Traffic Density
+                  </button>
+                  <button
+                    onClick={() => setShowSearch(!showSearch)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showSearch
+                        ? "bg-[#a050ff20] text-[#a050ff] border border-[#a050ff44]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showSearch ? "bg-[#a050ff]" : "bg-[#1e2028]"}`} />
+                    Search Convergence
+                  </button>
+                </div>
+              </div>
+
               {/* Data sources */}
               <div className="px-4 py-3 flex-1">
                 <div className="text-[10px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-2">
@@ -179,6 +256,10 @@ export default function Home() {
                 venues={venues}
                 hour={hour}
                 onVenueClick={(v) => setSelectedVenue(v.name)}
+                trafficHeatmap={trafficHeatmap}
+                searchHeatmap={searchHeatmap}
+                showTraffic={showTraffic}
+                showSearch={showSearch}
               />
             </div>
 

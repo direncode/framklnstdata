@@ -19,6 +19,12 @@ interface Venue {
   outdoor_seating?: string;
 }
 
+interface HeatmapPoint {
+  lat: number;
+  lon: number;
+  weight: number;
+}
+
 function busynessColor(b: number | null): string {
   if (b == null || b <= 0) return "#4a9eff";
   if (b >= 80) return "#ff2244";
@@ -28,19 +34,39 @@ function busynessColor(b: number | null): string {
   return "#4a9eff";
 }
 
+function toGeoJSON(points: HeatmapPoint[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: points.map((p) => ({
+      type: "Feature" as const,
+      geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] },
+      properties: { weight: p.weight },
+    })),
+  };
+}
+
 export default function MapView({
   venues,
   hour,
   onVenueClick,
+  trafficHeatmap,
+  searchHeatmap,
+  showTraffic,
+  showSearch,
 }: {
   venues: Venue[];
   hour: number;
   onVenueClick?: (v: Venue) => void;
+  trafficHeatmap?: HeatmapPoint[];
+  searchHeatmap?: HeatmapPoint[];
+  showTraffic: boolean;
+  showSearch: boolean;
 }) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   // Initialize map once
   useEffect(() => {
@@ -85,7 +111,7 @@ export default function MapView({
           },
         ],
       },
-      center: [-79.055, 35.920],
+      center: [-79.055, 35.92],
       zoom: 14.5,
       pitch: 0,
       bearing: 0,
@@ -99,6 +125,64 @@ export default function MapView({
       "bottom-left"
     );
 
+    map.on("load", () => {
+      // Traffic density heatmap source + layer (red-orange)
+      map.addSource("traffic-heat", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "traffic-heatmap",
+        type: "heatmap",
+        source: "traffic-heat",
+        paint: {
+          "heatmap-weight": ["get", "weight"],
+          "heatmap-intensity": 1.5,
+          "heatmap-radius": 30,
+          "heatmap-opacity": 0.6,
+          "heatmap-color": [
+            "interpolate", ["linear"], ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.2, "rgba(0,212,170,0.3)",
+            0.4, "rgba(255,170,0,0.5)",
+            0.6, "rgba(255,102,0,0.7)",
+            0.8, "rgba(255,34,68,0.8)",
+            1, "rgba(255,34,68,1)",
+          ],
+        },
+        layout: { visibility: "none" },
+      });
+
+      // Search convergence heatmap source + layer (blue-purple)
+      map.addSource("search-heat", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "search-heatmap",
+        type: "heatmap",
+        source: "search-heat",
+        paint: {
+          "heatmap-weight": ["get", "weight"],
+          "heatmap-intensity": 1.5,
+          "heatmap-radius": 35,
+          "heatmap-opacity": 0.5,
+          "heatmap-color": [
+            "interpolate", ["linear"], ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.2, "rgba(74,158,255,0.2)",
+            0.4, "rgba(100,80,255,0.4)",
+            0.6, "rgba(150,50,255,0.6)",
+            0.8, "rgba(200,50,255,0.8)",
+            1, "rgba(255,50,255,1)",
+          ],
+        },
+        layout: { visibility: "none" },
+      });
+
+      setMapReady(true);
+    });
+
     mapRef.current = map;
 
     return () => {
@@ -106,6 +190,35 @@ export default function MapView({
       mapRef.current = null;
     };
   }, []);
+
+  // Update heatmap data
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const trafficSrc = map.getSource("traffic-heat") as maplibregl.GeoJSONSource | undefined;
+    if (trafficSrc && trafficHeatmap) {
+      trafficSrc.setData(toGeoJSON(trafficHeatmap));
+    }
+
+    const searchSrc = map.getSource("search-heat") as maplibregl.GeoJSONSource | undefined;
+    if (searchSrc && searchHeatmap) {
+      searchSrc.setData(toGeoJSON(searchHeatmap));
+    }
+  }, [trafficHeatmap, searchHeatmap, mapReady]);
+
+  // Toggle heatmap visibility
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    if (map.getLayer("traffic-heatmap")) {
+      map.setLayoutProperty("traffic-heatmap", "visibility", showTraffic ? "visible" : "none");
+    }
+    if (map.getLayer("search-heatmap")) {
+      map.setLayoutProperty("search-heatmap", "visibility", showSearch ? "visible" : "none");
+    }
+  }, [showTraffic, showSearch, mapReady]);
 
   // Update markers when venues or hour change
   useEffect(() => {
@@ -148,12 +261,12 @@ export default function MapView({
         el.style.transform = "scale(1.3)";
         wrapper.style.zIndex = "10";
 
-        // Show popup with rich metadata
         const busynessText =
+          isClosed ? "CLOSED" :
           v.busyness != null && v.busyness > 0 ? `${v.busyness}% busy` : "no traffic data";
-        const cuisine = (v as any).cuisine ? `<div style="color: #6b7080;">${(v as any).cuisine}</div>` : "";
-        const address = (v as any).address ? `<div style="color: #454a58; margin-top: 2px;">${(v as any).address}</div>` : "";
-        const category = (v as any).category ? `<div style="color: #454a58; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; margin-top: 3px;">${(v as any).category}</div>` : "";
+        const cuisine = v.cuisine ? `<div style="color: #6b7080;">${v.cuisine}</div>` : "";
+        const address = v.address ? `<div style="color: #454a58; margin-top: 2px;">${v.address}</div>` : "";
+        const category = v.category ? `<div style="color: #454a58; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; margin-top: 3px;">${v.category}</div>` : "";
 
         popupRef.current = new maplibregl.Popup({
           offset: size / 2 + 6,
@@ -164,7 +277,7 @@ export default function MapView({
           .setHTML(
             `<div style="font-family: monospace; font-size: 11px; padding: 4px; max-width: 220px;">
               <div style="color: ${color}; font-weight: bold;">${v.name}</div>
-              <div style="color: #6b7080; margin-top: 2px;">${busynessText}</div>
+              <div style="color: ${isClosed ? '#ff4d6a' : '#6b7080'}; margin-top: 2px;">${busynessText}</div>
               <div style="color: #6b7080;">${v.amenity_type}</div>
               ${cuisine}${address}${category}
             </div>`
@@ -194,9 +307,11 @@ export default function MapView({
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* Overlay labels */}
+      {/* Overlay label */}
       <div className="absolute top-3 left-3 bg-[#0a0b0fcc] px-3 py-1.5 rounded text-[10px] font-mono text-[#00d4aa] tracking-wider uppercase pointer-events-none">
         Live Foot Traffic — {hour}:00
+        {showTraffic && <span className="ml-2 text-[#ff6600]">HEAT</span>}
+        {showSearch && <span className="ml-2 text-[#a050ff]">SEARCH</span>}
       </div>
 
       {/* Legend */}
@@ -217,6 +332,16 @@ export default function MapView({
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-[#4a9eff]" /> no data
           </span>
+          {showTraffic && (
+            <span className="flex items-center gap-1.5 mt-1 border-t border-[#1e2028] pt-1">
+              <span className="w-2 h-2 rounded-full bg-[#ff6600]" /> traffic heat
+            </span>
+          )}
+          {showSearch && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#a050ff]" /> search conv.
+            </span>
+          )}
         </div>
       </div>
 
