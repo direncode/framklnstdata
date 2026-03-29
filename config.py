@@ -225,6 +225,16 @@ MFG_VENUE_PROFILES = {
 # Day-of-week multipliers (Mon=0 through Sun=6)
 MFG_DAY_MULTIPLIERS = [0.5, 0.5, 0.6, 0.7, 0.9, 1.0, 0.8]
 
+# Keyword-Space MFG Configuration (BTUT Search Algorithm)
+KEYWORD_MFG_CONFIG = {
+    "kernel_bandwidth": 2.0,           # σ_k: keyword interaction range
+    "diffusion": 0.05,                 # D_k: exploration noise in keyword space
+    "dt": 0.01,                        # Time step
+    "max_iterations": 100,             # Max PDE steps
+    "convergence_threshold": 1e-4,     # Nash gap threshold
+    "anti_crowding": 0.2,              # Prevents keyword monoculture
+}
+
 # Fallback operating hours when OSM opening_hours is missing
 # Format: (open_hour, close_hour) — used to zero out busyness for closed venues
 MFG_FALLBACK_HOURS = {

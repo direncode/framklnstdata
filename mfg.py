@@ -764,38 +764,7 @@ def collect_signals() -> dict:
         "demographics": None,       # Always populated (hardcoded ACS)
     }
 
-    # --- 1. Google Trends (writes to file cache — instant on subsequent calls) ---
-    trends_scores = None
-    try:
-        from trends import fetch_trends
-        from config import SEED_KEYWORDS
-        # fetch_trends has 1-hour file cache — first call is slow, rest instant
-        all_kw = list(SEED_KEYWORDS[:3])
-        for vtype_kws in VENUE_SEARCH_KEYWORDS.values():
-            all_kw.append(vtype_kws[0])
-        all_kw = list(dict.fromkeys(all_kw))[:10]
-        trends_scores = fetch_trends(keywords=all_kw)
-        if trends_scores:
-            signals["trends_interest"] = trends_scores
-            print(f"    [sig] trends: {len(trends_scores)} keywords")
-    except Exception as e:
-        print(f"    [sig] trends: {e}")
-
-    # --- 2. Search convergence by venue type (from trends, no extra API) ---
-    if trends_scores:
-        try:
-            venue_type_scores = {}
-            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
-                matching = [trends_scores.get(kw, 0) for kw in kws if kw in trends_scores]
-                if matching:
-                    venue_type_scores[vtype] = sum(matching) / len(matching)
-            if venue_type_scores:
-                signals["search_convergence_by_type"] = venue_type_scores
-                print(f"    [sig] convergence: {len(venue_type_scores)} types")
-        except Exception:
-            pass
-
-    # --- 3. Weather ---
+    # --- 1. Weather (fetched first so keyword MFG can use it) ---
     try:
         from intel import fetch_weather
         weather = fetch_weather()
@@ -805,7 +774,7 @@ def collect_signals() -> dict:
     except Exception as e:
         print(f"    [sig] weather: {e}")
 
-    # --- 4. UNC Events ---
+    # --- 2. UNC Events (fetched first so keyword MFG can use it) ---
     try:
         from intel import fetch_unc_events
         events = fetch_unc_events()
@@ -814,6 +783,27 @@ def collect_signals() -> dict:
             print(f"    [sig] events: {len(events)} found")
     except Exception as e:
         print(f"    [sig] events: {e}")
+
+    # --- 3. BTUT Keyword-Space MFG (the core search algorithm) ---
+    # Runs a Fokker-Planck PDE over ~120 keywords to find what Chapel Hill
+    # is searching for. Uses events + weather + RSS + time profiles as input.
+    # Produces keyword scores AND venue type scores in one pass.
+    try:
+        from btut_search import solve_keyword_mfg
+        kw_result = solve_keyword_mfg(
+            hour=datetime.now().hour,
+            events=signals.get("events"),
+            weather=signals.get("weather"),
+        )
+        signals["trends_interest"] = kw_result["keyword_scores"]
+        signals["search_convergence_by_type"] = kw_result["venue_type_scores"]
+        signals["keyword_hot"] = kw_result["hot_keywords"]
+        signals["keyword_topics"] = kw_result["local_topics"]
+        signals["keyword_nash_gap"] = kw_result["nash_gap"]
+        print(f"    [sig] keyword MFG: {len(kw_result['hot_keywords'])} hot, "
+              f"gap={kw_result['nash_gap']:.2e}, {kw_result['iterations']} steps")
+    except Exception as e:
+        print(f"    [sig] keyword MFG: {e}")
 
     # --- 5. Reddit — removed (rate limited on Fly.io) ---
 

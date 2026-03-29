@@ -71,10 +71,10 @@ export default function CommandPanel({ hour }: { hour: number }) {
       fetch(`${API_BASE}/trends?live=true`).then((r) => r.ok ? r.json() : null),
     ]);
 
-    // Extract local topics from trends response
+    // Extract keyword MFG data from trends response
     if (trendsRes.status === "fulfilled" && trendsRes.value) {
-      const topics = trendsRes.value?.local_topics || [];
-      setLocalTopics(topics);
+      const td = trendsRes.value;
+      setLocalTopics(td?.local_topics || []);
     }
 
     if (densRes.status === "fulfilled" && densRes.value) setDensity(densRes.value);
@@ -236,27 +236,42 @@ export default function CommandPanel({ hour }: { hour: number }) {
             {localTopics.length > 0 && (
               <div className="px-6 py-4 border-t border-[#1e2028]">
                 <div className="text-[9px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-3">
-                  Chapel Hill Trending Now
+                  BTUT Keyword Convergence
                 </div>
                 <div className="space-y-2">
-                  {localTopics.slice(0, 12).map((t, i) => (
-                    <div key={i} className="flex items-start gap-2 text-[11px] font-mono">
-                      <span className={`shrink-0 mt-1 w-1.5 h-1.5 rounded-full ${
-                        t.source === "Google Trends" ? "bg-[#4a9eff]" :
-                        t.source === "UNC Events" ? "bg-[#00d4aa]" :
-                        "bg-[#ff6600]"
-                      }`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[#e2e4e9] truncate">{t.topic}</div>
-                        <div className="text-[9px] text-[#454a58]">{t.source}</div>
+                  {localTopics.slice(0, 15).map((t, i) => {
+                    const trajectory = (t as any).trajectory;
+                    const arrow = trajectory === "rising" ? "↑" : trajectory === "falling" ? "↓" : "→";
+                    const arrowColor = trajectory === "rising" ? "#00d4aa" : trajectory === "falling" ? "#ff4d6a" : "#454a58";
+                    return (
+                      <div key={i} className="flex items-start gap-2 text-[11px] font-mono">
+                        <span className={`shrink-0 mt-1 w-1.5 h-1.5 rounded-full ${
+                          t.source === "Google Trends" ? "bg-[#4a9eff]" :
+                          t.source === "UNC Events" ? "bg-[#00d4aa]" :
+                          t.source === "BTUT Keyword MFG" ? "bg-[#ff6600]" :
+                          "bg-[#454a58]"
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[#e2e4e9] truncate">
+                            {(t as any).keyword || t.topic}
+                          </div>
+                          <div className="text-[9px] text-[#454a58]">
+                            {t.source}
+                            {(t as any).venue_type && (t as any).venue_type !== "trending" && (t as any).venue_type !== "event"
+                              ? ` · ${(t as any).venue_type}` : ""}
+                          </div>
+                        </div>
+                        <span className="shrink-0 text-[10px]" style={{ color: arrowColor }}>
+                          {arrow}
+                        </span>
+                        <span className="shrink-0 text-[10px]" style={{
+                          color: t.score >= 70 ? "#ff6600" : t.score >= 40 ? "#ffaa00" : "#454a58"
+                        }}>
+                          {t.score}
+                        </span>
                       </div>
-                      <span className="shrink-0 text-[10px]" style={{
-                        color: t.score >= 70 ? "#ff6600" : t.score >= 40 ? "#ffaa00" : "#454a58"
-                      }}>
-                        {t.score}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -293,6 +308,14 @@ export default function CommandPanel({ hour }: { hour: number }) {
                 {density?.converged ? "YES" : density ? "APPROX" : "--"}
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Keyword MFG Engine */}
+        <div className="px-4 py-3 border-b border-[#1e2028]">
+          <div className="text-[9px] font-mono text-[#ff6600] uppercase mb-2">Keyword PDE</div>
+          <div className="text-[10px] font-mono text-[#6b7080]">
+            Fokker-Planck over ~{localTopics.filter(t => t.source === "BTUT Keyword MFG").length + 100} keywords
           </div>
         </div>
 

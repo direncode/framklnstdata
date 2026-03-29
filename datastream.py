@@ -311,41 +311,49 @@ def handle_trends(params):
     live = params.get("live", ["false"])[0].lower() == "true"
     area = params.get("area", [None])[0]
 
-    # Get cached local trends data (instant — populated by background thread)
-    local_trends = None
-    local_topics = []
+    # Read all keyword MFG data from background signal cache (instant)
+    keyword_scores = {}
+    venue_type_scores = {}
+    keyword_topics = []
+    hot_keywords = []
+    keyword_nash_gap = None
     try:
         import mfg as mfg_module
-        cached = (mfg_module._signals_cache.get("latest") or {}).get("trends_interest")
-        if cached and isinstance(cached, dict):
-            local_trends = cached
-            local_topics = cached.get("_local_topics", [])
+        cached = mfg_module._signals_cache.get("latest") or {}
+        keyword_scores = cached.get("trends_interest") or {}
+        venue_type_scores = cached.get("search_convergence_by_type") or {}
+        keyword_topics = cached.get("keyword_topics") or []
+        hot_keywords = cached.get("keyword_hot") or []
+        keyword_nash_gap = cached.get("keyword_nash_gap")
     except Exception:
         pass
 
-    if live and local_trends is None:
-        # Direct fetch if no cache (will populate cache for next time)
-        from trends import fetch_trends
-        local_trends = fetch_trends()
-        if local_trends:
-            local_topics = local_trends.get("_local_topics", [])
-
-    # Build venue type interest from trends
-    type_interest = {}
-    if local_trends:
-        for k, v in local_trends.items():
-            if not k.startswith("_") and isinstance(v, (int, float)):
-                type_interest[k] = v
+    # If no cache and live requested, run keyword MFG directly
+    if live and not keyword_scores:
+        try:
+            from btut_search import solve_keyword_mfg
+            result = solve_keyword_mfg(hour=datetime.now().hour)
+            keyword_scores = result["keyword_scores"]
+            venue_type_scores = result["venue_type_scores"]
+            keyword_topics = result["local_topics"]
+            hot_keywords = result["hot_keywords"]
+            keyword_nash_gap = result["nash_gap"]
+        except Exception:
+            pass
 
     return {
-        "has_data": bool(type_interest),
+        "has_data": bool(keyword_scores),
         "geo": DEFAULT_GEO,
-        "geo_description": "Chapel Hill / Triangle NC (hyper-local)",
-        "type_interest": type_interest,
-        "local_topics": local_topics,
+        "geo_description": "Chapel Hill / Triangle NC (BTUT Keyword MFG)",
+        "algorithm": "Fokker-Planck Keyword-Space Mean-Field Game",
+        "keyword_scores": keyword_scores,
+        "venue_type_scores": venue_type_scores,
+        "hot_keywords": hot_keywords,
+        "local_topics": keyword_topics,
+        "keyword_nash_gap": keyword_nash_gap,
         "suggestions": [],
-        "trending_now": [t["topic"] for t in local_topics[:10]],
-        "locally_relevant": [t["topic"] for t in local_topics
+        "trending_now": [t.get("keyword", "") for t in keyword_topics[:10]],
+        "locally_relevant": [t.get("keyword", "") for t in keyword_topics
                              if t.get("source") == "Google Trends"],
         "interest_by_city": {},
         "timestamp": datetime.now().isoformat(),
