@@ -56,12 +56,49 @@ export default function CommandPanel({ hour }: { hour: number }) {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [convRes, densRes] = await Promise.allSettled([
-      fetch(`${API_BASE}/convergence?hour=${hour}`).then((r) => r.ok ? r.json() : null),
-      fetch(`${API_BASE}/density?hour=${hour}`).then((r) => r.ok ? r.json() : null),
-    ]);
-    if (convRes.status === "fulfilled" && convRes.value) setConvergence(convRes.value);
-    if (densRes.status === "fulfilled" && densRes.value) setDensity(densRes.value);
+    // Fetch density (instant, cache-first) — skip convergence (requires trends)
+    try {
+      const densRes = await fetch(`${API_BASE}/density?hour=${hour}`);
+      if (densRes.ok) setDensity(await densRes.json());
+    } catch { /* empty */ }
+
+    // Build convergence from spots data (already computed, instant)
+    try {
+      const spotsRes = await fetch(`${API_BASE}/spots?hour=${hour}`);
+      if (spotsRes.ok) {
+        const data = await spotsRes.json();
+        const spots = data?.spots || [];
+        // Group by venue type and compute average busyness
+        const typeScores: Record<string, number[]> = {};
+        const venueScores: Record<string, number> = {};
+        for (const s of spots) {
+          const b = s.busyness ?? 0;
+          if (b > 0) {
+            const t = s.amenity_type || "unknown";
+            if (!typeScores[t]) typeScores[t] = [];
+            typeScores[t].push(b);
+            venueScores[s.name] = b;
+          }
+        }
+        const topSearches = Object.entries(typeScores)
+          .map(([vt, scores]) => ({
+            venue_type: vt,
+            score: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 15);
+
+        const heatmap = spots
+          .filter((s: any) => (s.busyness ?? 0) > 0)
+          .map((s: any) => [s.lat, s.lon, s.busyness / 100]);
+
+        setConvergence({
+          venue_scores: venueScores,
+          top_searches: topSearches,
+          heatmap,
+        });
+      }
+    } catch { /* empty */ }
     setLoading(false);
   }, [hour]);
 
@@ -89,10 +126,10 @@ export default function CommandPanel({ hour }: { hour: number }) {
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#1e2028] bg-[#0a0b0f]">
           <div className="text-[10px] font-mono tracking-[0.2em] text-[#ff6600] uppercase">
-            Search Trajectory Analysis
+            Venue Intelligence Command
           </div>
           <div className="text-xs text-[#454a58] mt-1">
-            Trending searches mapped to venue convergence at {hour}:00
+            Live busyness by venue type at {hour}:00 — BTUT density analysis
           </div>
         </div>
 
@@ -116,7 +153,7 @@ export default function CommandPanel({ hour }: { hour: number }) {
             {/* Trending Search Types */}
             <div className="px-6 py-4">
               <div className="text-[9px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-3">
-                Live Search Interest by Venue Type
+                Busyness by Venue Type
               </div>
               <div className="space-y-3">
                 {topSearches.map((s) => {
@@ -147,7 +184,7 @@ export default function CommandPanel({ hour }: { hour: number }) {
             {/* Venue Convergence Log */}
             <div className="px-6 py-4 border-t border-[#1e2028]">
               <div className="text-[9px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-3">
-                Venue Convergence Targets
+                Top Venues by Busyness
               </div>
               <div className="space-y-1 font-mono text-[11px]">
                 {topVenues.map((v, i) => {

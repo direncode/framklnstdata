@@ -771,8 +771,9 @@ def collect_signals() -> dict:
         weather = fetch_weather()
         if weather:
             signals["weather"] = weather
-    except Exception:
-        pass
+            print("    [sig] weather: OK")
+    except Exception as e:
+        print(f"    [sig] weather: {e}")
 
     # --- 4. UNC Events ---
     try:
@@ -780,8 +781,9 @@ def collect_signals() -> dict:
         events = fetch_unc_events()
         if events:
             signals["events"] = events
-    except Exception:
-        pass
+            print(f"    [sig] events: {len(events)} found")
+    except Exception as e:
+        print(f"    [sig] events: {e}")
 
     # --- 5. Reddit social buzz ---
     try:
@@ -789,7 +791,6 @@ def collect_signals() -> dict:
         posts = fetch_reddit_feed(limit=10)
         if posts:
             avg_score = sum(p.get("score", 0) for p in posts) / len(posts)
-            # Extract mentioned venue types from post titles
             titles = " ".join(p.get("title", "") for p in posts).lower()
             buzz_types = set()
             for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
@@ -800,45 +801,48 @@ def collect_signals() -> dict:
                 "post_count": len(posts),
                 "buzz_types": list(buzz_types),
             }
-    except Exception:
-        pass
+            print(f"    [sig] reddit: {len(posts)} posts, avg={avg_score:.0f}")
+    except Exception as e:
+        print(f"    [sig] reddit: {e}")
 
-    # --- 6. Transit stop density (pedestrian accessibility) ---
+    # --- 6. Transit stop density ---
     try:
         from osint import fetch_transit_stops
         stops = fetch_transit_stops()
         if stops:
             signals["transit_stops"] = stops
-    except Exception:
-        pass
+            print(f"    [sig] transit: {len(stops)} stops")
+    except Exception as e:
+        print(f"    [sig] transit: {e}")
 
-    # --- 7. Crime/incident data (safety factor) ---
+    # --- 7. Crime/incident data ---
     try:
         from osint import fetch_crime_data
         crimes = fetch_crime_data()
         if crimes:
             signals["crime_data"] = crimes
-    except Exception:
-        pass
+            print(f"    [sig] crime: {len(crimes)} incidents")
+    except Exception as e:
+        print(f"    [sig] crime: {e}")
 
-    # --- 8. Daily Tar Heel headlines (news keyword boost) ---
+    # --- 8. Daily Tar Heel headlines ---
     try:
         from livefeed import fetch_dth_feed
         articles = fetch_dth_feed()
         if articles:
-            # Extract keywords from headlines for venue matching
             all_titles = " ".join(a.get("title", "") for a in articles).lower()
             news_kw = {}
             for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
                 hits = sum(1 for kw in kws if kw.lower() in all_titles)
                 if hits > 0:
-                    news_kw[vtype] = min(hits * 20, 100)  # 0-100 score
+                    news_kw[vtype] = min(hits * 20, 100)
             if news_kw:
                 signals["news_keywords"] = news_kw
-    except Exception:
-        pass
+            print(f"    [sig] news: {len(articles)} articles")
+    except Exception as e:
+        print(f"    [sig] news: {e}")
 
-    # --- 9. Census demographics (college crowd multiplier) ---
+    # --- 9. Census demographics ---
     try:
         from intel import fetch_demographics
         demo = fetch_demographics()
@@ -848,8 +852,9 @@ def collect_signals() -> dict:
                 "pct_college_age": pct_18_24,
                 "college_multiplier": 1.0 + (pct_18_24 / 100.0) * 0.5,
             }
-    except Exception:
-        pass
+            print(f"    [sig] demographics: {pct_18_24:.1f}% college age")
+    except Exception as e:
+        print(f"    [sig] demographics: {e}")
 
     return signals
 
