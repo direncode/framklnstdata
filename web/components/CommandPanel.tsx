@@ -12,6 +12,12 @@ interface ConvergenceData {
   message?: string;
 }
 
+interface LocalTopic {
+  source: string;
+  topic: string;
+  score: number;
+}
+
 interface DensityData {
   signal_inputs: Record<string, string>;
   nash_gap: number;
@@ -52,17 +58,25 @@ function intensityLabel(score: number): string {
 export default function CommandPanel({ hour }: { hour: number }) {
   const [convergence, setConvergence] = useState<ConvergenceData | null>(null);
   const [density, setDensity] = useState<DensityData | null>(null);
+  const [localTopics, setLocalTopics] = useState<LocalTopic[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
 
-    // Fetch all three in parallel — all are cache-first (instant)
-    const [densRes, convRes, spotsRes] = await Promise.allSettled([
+    // Fetch all four in parallel — all are cache-first (instant)
+    const [densRes, convRes, spotsRes, trendsRes] = await Promise.allSettled([
       fetch(`${API_BASE}/density?hour=${hour}`).then((r) => r.ok ? r.json() : null),
       fetch(`${API_BASE}/convergence?hour=${hour}`).then((r) => r.ok ? r.json() : null),
       fetch(`${API_BASE}/spots?hour=${hour}`).then((r) => r.ok ? r.json() : null),
+      fetch(`${API_BASE}/trends?live=true`).then((r) => r.ok ? r.json() : null),
     ]);
+
+    // Extract local topics from trends response
+    if (trendsRes.status === "fulfilled" && trendsRes.value) {
+      const topics = trendsRes.value?.local_topics || [];
+      setLocalTopics(topics);
+    }
 
     if (densRes.status === "fulfilled" && densRes.value) setDensity(densRes.value);
 
@@ -217,6 +231,35 @@ export default function CommandPanel({ hour }: { hour: number }) {
                 )}
               </div>
             </div>
+
+            {/* Local Trending Topics */}
+            {localTopics.length > 0 && (
+              <div className="px-6 py-4 border-t border-[#1e2028]">
+                <div className="text-[9px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-3">
+                  Chapel Hill Trending Now
+                </div>
+                <div className="space-y-2">
+                  {localTopics.slice(0, 12).map((t, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[11px] font-mono">
+                      <span className={`shrink-0 mt-1 w-1.5 h-1.5 rounded-full ${
+                        t.source === "Google Trends" ? "bg-[#4a9eff]" :
+                        t.source === "UNC Events" ? "bg-[#00d4aa]" :
+                        "bg-[#ff6600]"
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[#e2e4e9] truncate">{t.topic}</div>
+                        <div className="text-[9px] text-[#454a58]">{t.source}</div>
+                      </div>
+                      <span className="shrink-0 text-[10px]" style={{
+                        color: t.score >= 70 ? "#ff6600" : t.score >= 40 ? "#ffaa00" : "#454a58"
+                      }}>
+                        {t.score}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

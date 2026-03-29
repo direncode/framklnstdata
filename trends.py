@@ -41,12 +41,19 @@ def _get_pytrends():
 
 def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     """
-    Fetch trending searches via Google Trends RSS feed (no auth, no rate limits).
-    Maps trending topics to venue-related keywords with synthetic interest scores.
-    Returns dict of {keyword: interest_score (0-100)} or None.
-    Cached for 1 hour.
+    Hyper-local Chapel Hill trend engine.
+
+    Fuses multiple local data sources into venue-type interest scores:
+    1. UNC Events Calendar — what's happening on campus NOW
+    2. Reddit r/UNC + r/chapelhill — what students are talking about
+    3. Google Trends RSS — national trends filtered for local relevance
+    4. Time-of-day patterns — what Chapel Hill searches for at this hour
+
+    Returns dict of {keyword_or_type: interest_score (0-100)}.
+    All sources are free, no API keys, no rate limits.
+    Cached for 30 minutes.
     """
-    import json, os, hashlib
+    import json, os
     from xml.etree import ElementTree
     from datetime import datetime, timedelta
     import requests
@@ -54,15 +61,15 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     if keywords is None:
         keywords = SEED_KEYWORDS
 
-    # File-based cache (1 hour TTL)
+    # File-based cache (30 min TTL for fresher local data)
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".franklinst_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, "trends_rss.json")
+    cache_file = os.path.join(cache_dir, "trends_local.json")
 
     try:
         if os.path.exists(cache_file):
             mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
-            if (datetime.now() - mtime) < timedelta(hours=1):
+            if (datetime.now() - mtime) < timedelta(minutes=30):
                 with open(cache_file) as f:
                     cached = json.load(f)
                 if cached:
@@ -71,55 +78,128 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
         pass
 
     results = {}
+    local_topics = []  # Raw trending topics for the Command panel
+    hour = datetime.now().hour
 
-    # Method 1: Google Trends Daily RSS (no auth, no rate limits)
+    # --- Source 1: UNC Events (most reliable local signal) ---
+    try:
+        from intel import fetch_unc_events
+        events = fetch_unc_events()
+        if events:
+            event_text = " ".join(e.get("title", "") + " " + e.get("description", "")
+                                  for e in events).lower()
+            # Score venue types by event keyword matches
+            for vtype, vkws in VENUE_SEARCH_KEYWORDS.items():
+                hits = sum(1 for kw in vkws if kw.lower() in event_text)
+                if hits > 0:
+                    results[vtype] = results.get(vtype, 0) + min(hits * 15, 60)
+
+            # Extract top event topics
+            for e in events[:10]:
+                title = e.get("title", "")
+                if title:
+                    local_topics.append({"source": "UNC Events", "topic": title, "score": 70})
+
+            print(f"  [+] Local trends: {len(events)} UNC events analyzed")
+    except Exception as e:
+        print(f"  [!] Local trends (events): {e}")
+
+    # --- Source 2: Reddit r/UNC + r/chapelhill (what students discuss) ---
+    try:
+        for sub in ["UNC", "chapelhill"]:
+            url = f"https://www.reddit.com/r/{sub}/hot.json?limit=10"
+            resp = requests.get(url, timeout=8, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; FranklinStData/4.0)",
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                for child in data.get("data", {}).get("children", []):
+                    post = child.get("data", {})
+                    title = post.get("title", "").lower()
+                    score = post.get("score", 0)
+
+                    # Score venue types by post title keyword matches
+                    for vtype, vkws in VENUE_SEARCH_KEYWORDS.items():
+                        if any(kw.lower() in title for kw in vkws[:5]):
+                            boost = min(score / 10, 30)  # Higher Reddit score = more interest
+                            results[vtype] = results.get(vtype, 0) + boost
+
+                    # Extract as local topic
+                    if score > 5:
+                        local_topics.append({
+                            "source": f"r/{sub}",
+                            "topic": post.get("title", "")[:80],
+                            "score": min(score, 100),
+                        })
+            time.sleep(0.5)
+        print(f"  [+] Local trends: Reddit analyzed")
+    except Exception as e:
+        print(f"  [!] Local trends (Reddit): {e}")
+
+    # --- Source 3: Google Trends RSS (national, filtered for local) ---
     try:
         rss_url = "https://trends.google.com/trending/rss?geo=US"
-        resp = requests.get(rss_url, timeout=10, headers={
+        resp = requests.get(rss_url, timeout=8, headers={
             "User-Agent": "Mozilla/5.0 (compatible; academic research)",
         })
         if resp.status_code == 200:
             root = ElementTree.fromstring(resp.content)
-            trending_titles = []
             for item in root.iter("item"):
                 title = item.findtext("title", "")
-                if title:
-                    trending_titles.append(title.lower())
+                if not title:
+                    continue
+                title_lower = title.lower()
 
-            # Score our keywords by how many trending titles mention related terms
-            for kw in keywords:
-                kw_lower = kw.lower()
-                kw_words = kw_lower.split()
-                hits = sum(1 for t in trending_titles
-                           if any(w in t for w in kw_words))
-                if hits > 0:
-                    results[kw] = min(100, hits * 25)
+                # Filter for local relevance
+                if any(kw in title_lower for kw in LOCAL_RELEVANCE_KEYWORDS):
+                    local_topics.append({
+                        "source": "Google Trends",
+                        "topic": title,
+                        "score": 90,
+                    })
 
-            # Also score venue-type keywords from VENUE_SEARCH_KEYWORDS
-            for vtype, vkws in VENUE_SEARCH_KEYWORDS.items():
-                for vkw in vkws[:3]:
-                    vkw_lower = vkw.lower()
-                    hits = sum(1 for t in trending_titles if vkw_lower in t)
-                    if hits > 0:
-                        results[vkw] = min(100, hits * 30)
-
-            print(f"  [+] Trends RSS: {len(trending_titles)} trending, {len(results)} matched")
+                # Score venue types from national trends
+                for vtype, vkws in VENUE_SEARCH_KEYWORDS.items():
+                    if any(kw.lower() in title_lower for kw in vkws[:3]):
+                        results[vtype] = results.get(vtype, 0) + 20
     except Exception as e:
-        print(f"  [!] Trends RSS error: {e}")
+        print(f"  [!] Local trends (RSS): {e}")
 
-    # If RSS gave nothing, assign baseline scores to seed keywords
-    if not results:
-        for kw in keywords[:5]:
-            results[kw] = 30  # Baseline interest
+    # --- Source 4: Time-of-day baseline (Chapel Hill patterns) ---
+    # What Chapel Hill searches for at this hour based on venue profiles
+    from config import MFG_VENUE_PROFILES
+    for vtype, profile in MFG_VENUE_PROFILES.items():
+        if isinstance(profile, list) and len(profile) > hour:
+            time_score = profile[hour]  # 0-100 from venue profile
+            results[vtype] = results.get(vtype, 0) + int(time_score * 0.3)
 
-    # Cache results
+    # Normalize all scores to 0-100
+    if results:
+        max_score = max(results.values()) if results.values() else 1
+        for k in results:
+            results[k] = min(100, int(results[k] * 100 / max(max_score, 1)))
+
+    # Sort local topics by score
+    local_topics.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Store topics alongside scores for the Command panel
+    final = {
+        **results,
+        "_local_topics": local_topics[:20],
+        "_source_count": sum(1 for s in ["events", "reddit", "rss"] if any(
+            t.get("source", "").lower().startswith(s[:3]) for t in local_topics
+        )),
+    }
+
+    # Cache
     try:
         with open(cache_file, "w") as f:
-            json.dump(results, f)
+            json.dump(final, f)
     except Exception:
         pass
 
-    return results if results else None
+    print(f"  [+] Local trends: {len(results)} venue types, {len(local_topics)} topics")
+    return final if results else None
 
 
 def fetch_interest_by_city(keyword, geo="US-NC"):

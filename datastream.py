@@ -311,59 +311,43 @@ def handle_trends(params):
     live = params.get("live", ["false"])[0].lower() == "true"
     area = params.get("area", [None])[0]
 
-    trends_report = None
-    if live:
-        # Try cached signals first (instant)
-        try:
-            import mfg as mfg_module
-            cached_trends = (mfg_module._signals_cache.get("latest") or {}).get("trends_interest")
-            if cached_trends:
-                trends_report = {
-                    "geo": DEFAULT_GEO,
-                    "geo_description": "Chapel Hill / Triangle NC",
-                    "interest_scores": cached_trends,
-                    "rising_queries": {},
-                    "rising_topics": {},
-                    "interest_by_city": {},
-                    "trending_now": [],
-                    "realtime": [],
-                    "locally_relevant": [],
-                }
-        except Exception:
-            pass
+    # Get cached local trends data (instant — populated by background thread)
+    local_trends = None
+    local_topics = []
+    try:
+        import mfg as mfg_module
+        cached = (mfg_module._signals_cache.get("latest") or {}).get("trends_interest")
+        if cached and isinstance(cached, dict):
+            local_trends = cached
+            local_topics = cached.get("_local_topics", [])
+    except Exception:
+        pass
 
-        # Fall back to full report only if no cache
-        if trends_report is None:
-            trends_report = build_trends_report(area=area)
+    if live and local_trends is None:
+        # Direct fetch if no cache (will populate cache for next time)
+        from trends import fetch_trends
+        local_trends = fetch_trends()
+        if local_trends:
+            local_topics = local_trends.get("_local_topics", [])
 
-    suggestions, has_data = generate_trivia_suggestions(trends_report)
+    # Build venue type interest from trends
+    type_interest = {}
+    if local_trends:
+        for k, v in local_trends.items():
+            if not k.startswith("_") and isinstance(v, (int, float)):
+                type_interest[k] = v
 
     return {
-        "has_data": has_data,
-        "geo": trends_report.get("geo", DEFAULT_GEO) if trends_report else DEFAULT_GEO,
-        "geo_description": trends_report.get("geo_description", "") if trends_report else "",
-        "suggestions": [
-            {
-                "category": s["category"],
-                "keyword": s["keyword"],
-                "score": s["score"],
-                "strength": s["strength"],
-                "suggestion": s["suggestion"],
-                "rising_queries": s.get("related_rising", []),
-                "rising_topics": s.get("rising_topics", []),
-                "top_cities": s.get("top_cities", []),
-            }
-            for s in suggestions
-        ],
-        "trending_now": (
-            trends_report.get("trending_now", []) if trends_report else []
-        ),
-        "locally_relevant": (
-            trends_report.get("locally_relevant", []) if trends_report else []
-        ),
-        "interest_by_city": (
-            trends_report.get("interest_by_city", {}) if trends_report else {}
-        ),
+        "has_data": bool(type_interest),
+        "geo": DEFAULT_GEO,
+        "geo_description": "Chapel Hill / Triangle NC (hyper-local)",
+        "type_interest": type_interest,
+        "local_topics": local_topics,
+        "suggestions": [],
+        "trending_now": [t["topic"] for t in local_topics[:10]],
+        "locally_relevant": [t["topic"] for t in local_topics
+                             if t.get("source") == "Google Trends"],
+        "interest_by_city": {},
         "timestamp": datetime.now().isoformat(),
     }
 
