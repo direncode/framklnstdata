@@ -21,6 +21,14 @@ FRANKLIN_STREET_BOUNDS = {
     "east": -79.0430,
 }
 
+# Full Chapel Hill bounding box — covers the entire town
+CHAPEL_HILL_BOUNDS = {
+    "south": 35.8800,
+    "north": 35.9600,
+    "west": -79.1100,
+    "east": -79.0100,
+}
+
 # Waypoints along Franklin Street for heat map interpolation
 # These define the "spine" of the street for continuous heat mapping
 FRANKLIN_STREET_SPINE = [

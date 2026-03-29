@@ -7,6 +7,14 @@ interface Venue {
   amenity_type: string;
   busyness: number | null;
   hourly_profile: number[] | null;
+  cuisine?: string;
+  address?: string;
+  category?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  outdoor_seating?: string;
+  brand?: string;
 }
 
 function BusynessBar({ value }: { value: number }) {
@@ -111,7 +119,12 @@ export default function VenuePanel({
               )}
             </div>
 
-            <div className="text-[10px] text-[#454a58] mt-0.5">{v.amenity_type}</div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[10px] text-[#454a58]">{v.amenity_type}</span>
+              {v.cuisine && (
+                <span className="text-[9px] text-[#6b7080]">{v.cuisine.split(";")[0]}</span>
+              )}
+            </div>
 
             {v.busyness != null && v.busyness > 0 && (
               <div className="mt-1.5">
@@ -119,15 +132,59 @@ export default function VenuePanel({
               </div>
             )}
 
-            {selectedVenue === v.name && v.hourly_profile && (
-              <div className="mt-2">
-                <div className="text-[9px] text-[#454a58] font-mono mb-0.5">24h profile</div>
-                <Sparkline data={v.hourly_profile} />
-                <div className="flex justify-between text-[8px] text-[#454a58] font-mono mt-0.5">
-                  <span>0:00</span>
-                  <span>12:00</span>
-                  <span>23:00</span>
+            {selectedVenue === v.name && (
+              <div className="mt-2 space-y-1.5">
+                {/* Address */}
+                {v.address && (
+                  <div className="text-[10px] text-[#6b7080]">{v.address}</div>
+                )}
+
+                {/* Metadata tags */}
+                <div className="flex flex-wrap gap-1">
+                  {v.outdoor_seating === "yes" && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#00d4aa15] text-[#00d4aa] font-mono">PATIO</span>
+                  )}
+                  {v.category && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#4a9eff15] text-[#4a9eff] font-mono uppercase">{v.category}</span>
+                  )}
+                  {v.brand && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#1e2028] text-[#6b7080] font-mono">{v.brand}</span>
+                  )}
                 </div>
+
+                {/* Hours */}
+                {v.opening_hours && (
+                  <div className="text-[9px] text-[#454a58] font-mono truncate">{v.opening_hours}</div>
+                )}
+
+                {/* Contact */}
+                {v.phone && (
+                  <div className="text-[9px] text-[#454a58]">{v.phone}</div>
+                )}
+                {v.website && (
+                  <a
+                    href={v.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-[#4a9eff] hover:underline truncate block"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {v.website.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}
+                  </a>
+                )}
+
+                {/* 24h profile */}
+                {v.hourly_profile && (
+                  <div>
+                    <div className="text-[9px] text-[#454a58] font-mono mb-0.5">24h profile</div>
+                    <Sparkline data={v.hourly_profile} />
+                    <div className="flex justify-between text-[8px] text-[#454a58] font-mono mt-0.5">
+                      <span>0:00</span>
+                      <span>12:00</span>
+                      <span>23:00</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </button>

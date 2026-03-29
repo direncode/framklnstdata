@@ -71,18 +71,50 @@ def _haversine(lat1, lon1, lat2, lon2):
 # BTUT Mean-Field Game Busyness
 # ---------------------------------------------------------------------------
 
-def get_venues_with_busyness(hour=None, radius_meters=500):
+def _build_venue(i, place, busyness=None, hourly_profile=None,
+                  busyness_source=None, nash_gap=None):
+    """Build a venue dict with full OSM metadata pass-through."""
+    return {
+        "id": i + 1,
+        "name": place["name"],
+        "lat": place["lat"],
+        "lon": place["lon"],
+        "amenity_type": place.get("amenity_type", "unknown"),
+        "osm_id": place.get("osm_id"),
+        "busyness": busyness,
+        "hourly_profile": hourly_profile,
+        "busyness_source": busyness_source,
+        "nash_gap": nash_gap,
+        # Rich metadata from OSM
+        "cuisine": place.get("cuisine", ""),
+        "opening_hours": place.get("opening_hours", ""),
+        "phone": place.get("phone", ""),
+        "website": place.get("website", ""),
+        "address": place.get("address", ""),
+        "addr_street": place.get("addr_street", ""),
+        "outdoor_seating": place.get("outdoor_seating", ""),
+        "wheelchair": place.get("wheelchair", ""),
+        "brand": place.get("brand", ""),
+        "category": place.get("category", ""),
+        "description": place.get("description", ""),
+        "takeaway": place.get("takeaway", ""),
+        "delivery": place.get("delivery", ""),
+    }
+
+
+def get_venues_with_busyness(hour=None, radius_meters=None):
     """
-    Get all Franklin Street venues with BTUT-computed foot traffic.
+    Get ALL Chapel Hill venues with BTUT-computed foot traffic.
 
     Strategy:
-    1. Discover venues via OpenStreetMap (free, cached 30 days)
+    1. Discover venues across Chapel Hill via OpenStreetMap (free, cached 30 days)
     2. Collect live signals (trends, weather, events)
     3. Run Fokker-Planck density solver to convergence
     4. Sample density at venue positions → busyness (0-100)
 
     The MFG engine fuses all signals into a continuous density
-    field ρ(x,t) over the Franklin Street corridor.
+    field ρ(x,t) over the Franklin Street corridor. Venues outside
+    the corridor still get time-of-day profile busyness.
     """
     if hour is None:
         hour = datetime.now().hour
@@ -95,8 +127,8 @@ def get_venues_with_busyness(hour=None, radius_meters=500):
         print(f"  [+] BTUT: using cached density ({len(cached)} venues, hour={hour})")
         return cached
 
-    # Step 1: Discover venues via OSM (always available, free)
-    osm_venues = fetch_nearby_places(radius_meters=radius_meters)
+    # Step 1: Discover ALL venues across Chapel Hill
+    osm_venues = fetch_nearby_places()
     if not osm_venues:
         osm_venues = []
 
@@ -104,7 +136,8 @@ def get_venues_with_busyness(hour=None, radius_meters=500):
     try:
         from mfg import get_mfg_engine, collect_signals
 
-        print(f"  [*] BTUT: solving density field (hour={hour}, day={day_of_week})...")
+        print(f"  [*] BTUT: solving density field (hour={hour}, day={day_of_week}, "
+              f"venues={len(osm_venues)})...")
         signals = collect_signals()
         engine = get_mfg_engine(osm_venues)
 
@@ -115,7 +148,7 @@ def get_venues_with_busyness(hour=None, radius_meters=500):
         converged = nash_gap < 1e-4
 
         print(f"  [+] BTUT: converged={'yes' if converged else 'approx'} "
-              f"(gap={nash_gap:.2e}, {iterations} steps)")
+              f"(gap={nash_gap:.2e}, {iterations} steps, {len(osm_venues)} venues)")
 
         # Also generate 24-hour profiles
         profiles_24h = {}
@@ -125,59 +158,26 @@ def get_venues_with_busyness(hour=None, radius_meters=500):
         except Exception:
             pass
 
-        # Build venue list with MFG busyness
+        # Build venue list with MFG busyness + full metadata
         venues = []
         venue_busyness = result["venue_busyness"]
         for i, place in enumerate(osm_venues):
             name = place["name"]
             vb = venue_busyness.get(name, {})
-            busyness = vb.get("busyness")
-            hourly_profile = profiles_24h.get(name)
-
-            venues.append({
-                "id": i + 1,
-                "name": name,
-                "lat": place["lat"],
-                "lon": place["lon"],
-                "amenity_type": place.get("amenity_type", "unknown"),
-                "osm_id": place.get("osm_id"),
-                "busyness": busyness,
-                "hourly_profile": hourly_profile,
-                "busyness_source": "btut_mfg",
-                "nash_gap": nash_gap,
-            })
+            venues.append(_build_venue(
+                i, place,
+                busyness=vb.get("busyness"),
+                hourly_profile=profiles_24h.get(name),
+                busyness_source="btut_mfg",
+                nash_gap=nash_gap,
+            ))
 
     except ImportError:
-        # numpy not installed — fall back to no busyness
         print("  [!] BTUT engine unavailable (numpy not installed)")
-        venues = []
-        for i, place in enumerate(osm_venues):
-            venues.append({
-                "id": i + 1,
-                "name": place["name"],
-                "lat": place["lat"],
-                "lon": place["lon"],
-                "amenity_type": place.get("amenity_type", "unknown"),
-                "osm_id": place.get("osm_id"),
-                "busyness": None,
-                "hourly_profile": None,
-                "busyness_source": None,
-            })
+        venues = [_build_venue(i, p) for i, p in enumerate(osm_venues)]
     except Exception as e:
         print(f"  [!] BTUT engine error: {e}")
-        venues = []
-        for i, place in enumerate(osm_venues):
-            venues.append({
-                "id": i + 1,
-                "name": place["name"],
-                "lat": place["lat"],
-                "lon": place["lon"],
-                "amenity_type": place.get("amenity_type", "unknown"),
-                "osm_id": place.get("osm_id"),
-                "busyness": None,
-                "hourly_profile": None,
-                "busyness_source": None,
-            })
+        venues = [_build_venue(i, p) for i, p in enumerate(osm_venues)]
 
     # Sort: busyness desc, then alphabetical
     with_data = [v for v in venues if v.get("busyness") is not None and v["busyness"] > 0]
@@ -198,7 +198,7 @@ def get_venues_with_busyness(hour=None, radius_meters=500):
 # Backward-compatible aliases
 # ---------------------------------------------------------------------------
 
-def get_enriched_spots(time_of_day="evening", hour=None, top_n=50):
+def get_enriched_spots(time_of_day="evening", hour=None, top_n=500):
     venues = get_venues_with_busyness(hour=hour)
     for v in venues:
         if v.get("busyness") is not None and v["busyness"] > 0:

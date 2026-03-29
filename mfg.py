@@ -121,13 +121,22 @@ class FranklinStreetMFG:
         self.n = n
 
         # Map each venue to its nearest grid index
-        self.venue_indices = {}
-        self.venue_types = {}
+        # Venues far from the spine (>200m) get time-profile-only busyness
+        self.venue_indices = {}      # name -> grid index (on-spine venues)
+        self.venue_types = {}        # name -> normalized type (all venues)
+        self.off_spine_venues = {}   # name -> True (too far from spine)
+
         for v in venues:
-            idx = self._nearest_grid_index(v["lat"], v["lon"])
-            self.venue_indices[v["name"]] = idx
             raw_type = v.get("amenity_type", "restaurant")
             self.venue_types[v["name"]] = self._normalize_type(raw_type)
+
+            idx = self._nearest_grid_index(v["lat"], v["lon"])
+            dist = _haversine(v["lat"], v["lon"],
+                              float(self.grid_lat[idx]), float(self.grid_lon[idx]))
+            if dist <= 200:  # Within 200m of spine
+                self.venue_indices[v["name"]] = idx
+            else:
+                self.off_spine_venues[v["name"]] = True
 
     def _nearest_grid_index(self, lat: float, lon: float) -> int:
         dists = np.sqrt(
@@ -299,7 +308,7 @@ class FranklinStreetMFG:
                 break
 
         # Extract venue busyness from density
-        venue_busyness = self._density_to_venue_busyness(rho)
+        venue_busyness = self._density_to_venue_busyness(rho, hour, day, signals)
 
         return {
             "density_field": rho,
@@ -313,7 +322,8 @@ class FranklinStreetMFG:
 
         Returns dict with hourly_profiles per venue and convergence info.
         """
-        hourly_profiles = {name: [] for name in self.venue_indices}
+        all_names = list(self.venue_indices.keys()) + list(self.off_spine_venues.keys())
+        hourly_profiles = {name: [] for name in all_names}
         convergence = {}
         density_fields = []
 
@@ -322,13 +332,13 @@ class FranklinStreetMFG:
             density_fields.append(result["density_field"])
             convergence[hour] = result["nash_gap"]
 
-            for name in self.venue_indices:
+            for name in all_names:
                 vb = result["venue_busyness"].get(name, {})
                 hourly_profiles[name].append(vb.get("busyness", 0))
 
         # Build venue_busyness with full profiles
         venue_busyness = {}
-        for name in self.venue_indices:
+        for name in all_names:
             venue_busyness[name] = {
                 "hourly_profile": hourly_profiles[name],
             }
@@ -342,27 +352,46 @@ class FranklinStreetMFG:
 
     # ----- Output Conversion -----
 
-    def _density_to_venue_busyness(self, rho: np.ndarray) -> dict:
-        """Sample density at venue positions, normalize to 0-100."""
-        # Get raw density at each venue position
+    def _density_to_venue_busyness(self, rho: np.ndarray, hour: int = 0,
+                                    day: int = 0, signals: dict = None) -> dict:
+        """Sample density at venue positions, normalize to 0-100.
+
+        On-spine venues get density-based busyness.
+        Off-spine venues get time-profile-based busyness.
+        """
+        result = {}
+
+        # --- On-spine venues: sample from density field ---
         raw_values = {}
         for name, idx in self.venue_indices.items():
-            # Average density in a small window around the venue
             lo = max(0, idx - 2)
             hi = min(self.n, idx + 3)
             raw_values[name] = float(np.mean(rho[lo:hi]))
 
-        if not raw_values:
-            return {}
+        if raw_values:
+            max_val = max(raw_values.values())
+            min_val = min(raw_values.values())
+            spread = max_val - min_val if max_val > min_val else 1e-8
 
-        # Normalize to 0-100 scale
-        max_val = max(raw_values.values())
-        min_val = min(raw_values.values())
-        spread = max_val - min_val if max_val > min_val else 1e-8
+            for name, raw in raw_values.items():
+                busyness = int(round(((raw - min_val) / spread) * 100))
+                busyness = max(0, min(100, busyness))
+                result[name] = {"busyness": busyness}
 
-        result = {}
-        for name, raw in raw_values.items():
-            busyness = int(round(((raw - min_val) / spread) * 100))
+        # --- Off-spine venues: time-profile based busyness ---
+        day_mult = MFG_DAY_MULTIPLIERS[day % 7] if day is not None else 0.7
+        weather_factor = 1.0
+        if signals:
+            weather = signals.get("weather")
+            if weather and isinstance(weather, dict):
+                if not weather.get("is_good_flyering_weather", True):
+                    weather_factor = 0.6
+
+        for name in self.off_spine_venues:
+            vtype = self.venue_types.get(name, "restaurant")
+            profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES["restaurant"])
+            base = profile[hour % 24] / 100.0
+            busyness = int(round(base * day_mult * weather_factor * 100))
             busyness = max(0, min(100, busyness))
             result[name] = {"busyness": busyness}
 

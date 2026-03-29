@@ -10,6 +10,13 @@ interface Venue {
   lon: number;
   amenity_type: string;
   busyness: number | null;
+  cuisine?: string;
+  address?: string;
+  category?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  outdoor_seating?: string;
 }
 
 function busynessColor(b: number | null): string {
@@ -78,12 +85,12 @@ export default function MapView({
           },
         ],
       },
-      center: [-79.0555, 35.9132],
-      zoom: 16.5,
+      center: [-79.055, 35.920],
+      zoom: 14.5,
       pitch: 0,
       bearing: 0,
       maxZoom: 19,
-      minZoom: 14,
+      minZoom: 12,
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -114,56 +121,67 @@ export default function MapView({
       const color = busynessColor(v.busyness);
       const size = v.busyness != null && v.busyness > 0 ? 14 + (v.busyness / 100) * 16 : 10;
 
-      // Create marker element
+      // Create marker element — anchor wrapper ensures scale from center
+      const wrapper = document.createElement("div");
+      wrapper.style.width = `${size}px`;
+      wrapper.style.height = `${size}px`;
+      wrapper.style.position = "relative";
+
       const el = document.createElement("div");
-      el.style.width = `${size}px`;
-      el.style.height = `${size}px`;
+      el.style.width = "100%";
+      el.style.height = "100%";
       el.style.borderRadius = "50%";
       el.style.border = `2px solid ${color}`;
       el.style.backgroundColor = color + "44";
       el.style.cursor = "pointer";
-      el.style.transition = "all 0.3s";
+      el.style.transition = "transform 0.2s ease, box-shadow 0.2s ease";
+      el.style.transformOrigin = "center center";
+      wrapper.appendChild(el);
 
       // Glow effect for busy venues
       if (v.busyness != null && v.busyness > 40) {
         el.style.boxShadow = `0 0 ${v.busyness / 4}px ${color}88, 0 0 ${v.busyness / 2}px ${color}33`;
       }
 
-      el.addEventListener("mouseenter", () => {
+      wrapper.addEventListener("mouseenter", () => {
         el.style.transform = "scale(1.3)";
-        el.style.zIndex = "10";
+        wrapper.style.zIndex = "10";
 
-        // Show popup
+        // Show popup with rich metadata
         const busynessText =
           v.busyness != null && v.busyness > 0 ? `${v.busyness}% busy` : "no traffic data";
+        const cuisine = (v as any).cuisine ? `<div style="color: #6b7080;">${(v as any).cuisine}</div>` : "";
+        const address = (v as any).address ? `<div style="color: #454a58; margin-top: 2px;">${(v as any).address}</div>` : "";
+        const category = (v as any).category ? `<div style="color: #454a58; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; margin-top: 3px;">${(v as any).category}</div>` : "";
 
         popupRef.current = new maplibregl.Popup({
-          offset: size / 2 + 4,
+          offset: size / 2 + 6,
           closeButton: false,
           className: "venue-popup",
         })
           .setLngLat([v.lon, v.lat])
           .setHTML(
-            `<div style="font-family: monospace; font-size: 11px; padding: 4px;">
+            `<div style="font-family: monospace; font-size: 11px; padding: 4px; max-width: 220px;">
               <div style="color: ${color}; font-weight: bold;">${v.name}</div>
               <div style="color: #6b7080; margin-top: 2px;">${busynessText}</div>
-              <div style="color: #454a58;">${v.amenity_type}</div>
+              <div style="color: #6b7080;">${v.amenity_type}</div>
+              ${cuisine}${address}${category}
             </div>`
           )
           .addTo(map);
       });
 
-      el.addEventListener("mouseleave", () => {
+      wrapper.addEventListener("mouseleave", () => {
         el.style.transform = "scale(1)";
-        el.style.zIndex = "";
+        wrapper.style.zIndex = "";
         popupRef.current?.remove();
       });
 
-      el.addEventListener("click", () => {
+      wrapper.addEventListener("click", () => {
         onVenueClick?.(v);
       });
 
-      const marker = new maplibregl.Marker({ element: el })
+      const marker = new maplibregl.Marker({ element: wrapper, anchor: "center" })
         .setLngLat([v.lon, v.lat])
         .addTo(map);
 

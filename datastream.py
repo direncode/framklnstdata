@@ -192,7 +192,7 @@ def handle_spots(params):
     hour = _parse_hour(params.get("hour", [None])[0])
     day = params.get("day", [None])[0]
     tod = params.get("time", ["evening"])[0]
-    n = int(params.get("n", ["10"])[0])
+    n = int(params.get("n", ["500"])[0])
 
     spots = get_enriched_spots(time_of_day=tod, hour=hour, top_n=n)
 
@@ -208,6 +208,18 @@ def handle_spots(params):
                 "busyness": s.get("busyness"),
                 "composite_score": s.get("composite_score", 0),
                 "hourly_profile": s.get("hourly_profile"),
+                # Rich metadata
+                "cuisine": s.get("cuisine", ""),
+                "opening_hours": s.get("opening_hours", ""),
+                "phone": s.get("phone", ""),
+                "website": s.get("website", ""),
+                "address": s.get("address", ""),
+                "outdoor_seating": s.get("outdoor_seating", ""),
+                "brand": s.get("brand", ""),
+                "category": s.get("category", ""),
+                "wheelchair": s.get("wheelchair", ""),
+                "takeaway": s.get("takeaway", ""),
+                "delivery": s.get("delivery", ""),
             }
             for i, s in enumerate(spots)
         ],

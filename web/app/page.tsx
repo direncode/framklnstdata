@@ -18,6 +18,14 @@ interface Venue {
   amenity_type: string;
   busyness: number | null;
   hourly_profile: number[] | null;
+  cuisine?: string;
+  address?: string;
+  category?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  outdoor_seating?: string;
+  brand?: string;
 }
 
 interface TrendsData {
