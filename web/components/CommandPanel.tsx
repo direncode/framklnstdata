@@ -66,9 +66,10 @@ export default function CommandPanel({ hour }: { hour: number }) {
 
     if (densRes.status === "fulfilled" && densRes.value) setDensity(densRes.value);
 
-    // Use convergence data if available (has live search signals)
-    if (convRes.status === "fulfilled" && convRes.value && !convRes.value.status) {
-      setConvergence(convRes.value);
+    // Use convergence data if it has venue scores
+    const convData = convRes.status === "fulfilled" ? convRes.value : null;
+    if (convData && convData.venues_with_signal > 0) {
+      setConvergence(convData);
     } else if (spotsRes.status === "fulfilled" && spotsRes.value) {
       // Fallback: build from spots busyness data
       const spots = spotsRes.value?.spots || [];
@@ -116,7 +117,7 @@ export default function CommandPanel({ hour }: { hour: number }) {
 
   const topSearches = convergence?.top_searches || [];
   const signalInputs = density?.signal_inputs || {};
-  const warming = convergence?.status === "warming_up";
+  const warming = !convergence && loading;
 
   return (
     <div className="flex-1 flex overflow-hidden">

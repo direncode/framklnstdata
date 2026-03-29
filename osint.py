@@ -64,54 +64,48 @@ def _write_cache(key, data):
 
 def fetch_transit_stops():
     """
-    Fetch bus stops near Franklin Street from Chapel Hill Transit GTFS.
-    Chapel Hill Transit publishes GTFS at a public URL.
+    Fetch bus/transit stops in Chapel Hill via OpenStreetMap Overpass API.
+    No API key needed, no GTFS ZIP download.
     Returns list of stop dicts or None.
     """
-    cached = _read_cache("transit_stops", max_age_hours=168)
+    cached = _read_cache("transit_stops", max_age_hours=720)
     if cached:
         return cached
 
-    # Chapel Hill Transit GTFS feed
-    gtfs_url = "https://www.townofchapelhill.org/home/showpublisheddocument/45131"
+    # Use Overpass API to get bus stops in Chapel Hill area
+    query = """
+    [out:json][timeout:30];
+    (
+      node["highway"="bus_stop"](35.880,-79.110,35.960,-79.010);
+      node["public_transport"="stop_position"](35.880,-79.110,35.960,-79.010);
+      node["public_transport"="platform"](35.880,-79.110,35.960,-79.010);
+    );
+    out;
+    """
 
     try:
-        resp = requests.get(gtfs_url, timeout=30)
+        from config import OVERPASS_API_URL
+        resp = requests.post(OVERPASS_API_URL, data={"data": query}, timeout=30)
         resp.raise_for_status()
-
-        import zipfile
-        import io as iomod
-
-        z = zipfile.ZipFile(iomod.BytesIO(resp.content))
+        data = resp.json()
 
         stops = []
-        if "stops.txt" in z.namelist():
-            with z.open("stops.txt") as f:
-                reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
-                for row in reader:
-                    try:
-                        lat = float(row.get("stop_lat", 0))
-                        lon = float(row.get("stop_lon", 0))
-                    except (ValueError, TypeError):
-                        continue
-
-                    # Filter to Chapel Hill area (expanded bounds)
-                    if (35.880 <= lat <= 35.960
-                        and -79.110 <= lon <= -79.010):
-                        stops.append({
-                            "stop_id": row.get("stop_id", ""),
-                            "stop_name": row.get("stop_name", ""),
-                            "lat": lat,
-                            "lon": lon,
-                        })
+        for element in data.get("elements", []):
+            tags = element.get("tags", {})
+            stops.append({
+                "stop_id": str(element.get("id", "")),
+                "stop_name": tags.get("name", tags.get("ref", f"Stop {element.get('id', '')}")),
+                "lat": element.get("lat"),
+                "lon": element.get("lon"),
+            })
 
         if stops:
             _write_cache("transit_stops", stops)
-            print(f"  [+] Transit: {len(stops)} stops near Franklin St")
+            print(f"  [+] Transit: {len(stops)} bus stops via OSM")
         return stops if stops else None
 
     except Exception as e:
-        print(f"  [!] Transit GTFS error: {e}")
+        print(f"  [!] Transit stops error: {e}")
         return None
 
 
@@ -129,14 +123,13 @@ def fetch_crime_data():
         return cached
 
     # Chapel Hill publishes incident data via ArcGIS (full Chapel Hill area)
-    bbox = "-79.110,35.880,-79.010,35.960"
-
     url = (
         "https://services1.arcgis.com/jOyGkcqHAywMxJEv/arcgis/rest/services"
         "/Police_Incidents/FeatureServer/0/query"
-        f"?where=1%3D1&outFields=*&geometry={bbox}"
-        f"&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326"
-        f"&resultRecordCount=200&f=json"
+        "?where=1%3D1&outFields=*"
+        "&geometry=-79.110,35.880,-79.010,35.960"
+        "&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&spatialRel=esriSpatialRelIntersects"
+        "&resultRecordCount=200&f=json"
     )
 
     try:
