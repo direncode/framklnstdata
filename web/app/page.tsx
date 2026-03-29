@@ -146,9 +146,9 @@ export default function Home() {
                 </div>
                 <div className="space-y-1.5 text-[10px] font-mono">
                   {[
+                    { name: "BTUT Engine", status: liveCount > 0 },
                     { name: "OpenStreetMap", status: apiConnected },
-                    { name: "Google Places", status: liveCount > 0 },
-                    { name: "NCDOT ArcGIS", status: apiConnected },
+                    { name: "Google Trends", status: apiConnected },
                   ].map((s) => (
                     <div key={s.name} className="flex items-center gap-2">
                       <span
@@ -206,9 +206,9 @@ export default function Home() {
                 <div className="text-[10px] text-[#454a58] mt-1">via OpenStreetMap Overpass</div>
               </div>
               <div className="metric-card glow-blue">
-                <div className="text-[9px] text-[#454a58] uppercase">Live Busyness</div>
+                <div className="text-[9px] text-[#454a58] uppercase">BTUT Density</div>
                 <div className="text-3xl font-mono text-[#4a9eff] mt-1">{liveCount}</div>
-                <div className="text-[10px] text-[#454a58] mt-1">via Google Places API</div>
+                <div className="text-[10px] text-[#454a58] mt-1">via Fokker-Planck MFG</div>
               </div>
               <div className="metric-card">
                 <div className="text-[9px] text-[#454a58] uppercase">API Status</div>
@@ -233,19 +233,19 @@ export default function Home() {
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">02</span>
-                  <span>Google Places API fetches hourly busyness (0-100%) for each venue. This is the only ranking signal.</span>
+                  <span>Live signals are collected: Google Trends interest scores, weather conditions, UNC events calendar, Reddit activity, and time-of-day venue profiles.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">03</span>
-                  <span>Busyness values become heat map weights. Linear interpolation between venues creates a convergent foot traffic corridor.</span>
+                  <span>The BTUT engine fuses all signals into a drift velocity field v[&rho;], then solves the Fokker-Planck PDE: &part;&rho;/&part;t = -&nabla;&middot;(v[&rho;]&rho;) + &sigma;&sup2;/2 &Delta;&rho; to convergence.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">04</span>
-                  <span>Live feeds (Reddit, DTH, UNC Calendar, Google Trends) extract keywords and surface trending topics.</span>
+                  <span>The density field &rho;(x,t) is sampled at each venue position to produce busyness scores (0-100%), and along the corridor spine for the continuous heat map.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">05</span>
-                  <span>Move the hour slider. Watch busyness shift. Go where the convergence is hottest.</span>
+                  <span>Move the hour slider. Watch the density field shift as venue type profiles change — cafes peak at morning, bars at night. The mean-field finds approximate Nash equilibrium.</span>
                 </div>
               </div>
             </div>

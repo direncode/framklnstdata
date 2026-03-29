@@ -24,10 +24,10 @@ export default function StatusBar({
         <span>{liveCount} with busyness</span>
       </div>
       <div className="flex items-center gap-4">
+        <span className="text-[#00d4aa]">BTUT MFG</span>
         <span>OSM Overpass</span>
-        <span>Google Places</span>
+        <span>Google Trends</span>
         <span>Reddit</span>
-        <span>DTH RSS</span>
         <span>UNC Calendar</span>
       </div>
     </div>

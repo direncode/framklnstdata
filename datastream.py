@@ -79,8 +79,9 @@ from network import (
 from main import generate_report
 
 # Version
-API_VERSION = "3.0.0"
+API_VERSION = "4.0.0"
 API_NAME = "Franklin Street Data Datastream"
+ENGINE_NAME = "BTUT Mean-Field Game Engine"
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +120,12 @@ def handle_root():
     return {
         "name": API_NAME,
         "version": API_VERSION,
+        "engine": ENGINE_NAME,
         "description": (
             "Surveillance-grade intelligence API for Franklin Street, "
-            "UNC Chapel Hill. Provides real-time foot traffic analysis, "
-            "venue intelligence, trend signals, demographic data, and "
-            "combined actionable reports."
+            "UNC Chapel Hill. Powered by the BTUT Fokker-Planck Mean-Field "
+            "Game engine for real-time foot traffic density modeling, "
+            "venue intelligence, trend signals, and combined reports."
         ),
         "center": {
             "lat": FRANKLIN_STREET_CENTER[0],
@@ -144,6 +146,7 @@ def handle_root():
             "/intel/events": "Event context and traffic multipliers",
             "/network": "Street network topology analysis",
             "/network/intersections": "Key intersections with connectivity scores",
+            "/density": "BTUT density field and convergence diagnostics",
             "/report": "Full combined text report",
             "/export": "Complete data export (all feeds combined)",
         },
@@ -153,15 +156,21 @@ def handle_root():
 
 def handle_status():
     """System health and data source status."""
-    from config import GOOGLE_PLACES_API_KEY
     import os
+
+    btut_status = "active"
+    try:
+        import numpy
+    except ImportError:
+        btut_status = "unavailable (numpy missing)"
 
     return {
         "status": "operational",
         "version": API_VERSION,
+        "engine": ENGINE_NAME,
         "timestamp": datetime.now().isoformat(),
         "data_feeds": {
-            "google_places": "active" if GOOGLE_PLACES_API_KEY else "no_key",
+            "btut_mfg": btut_status,
             "openstreetmap": "active",
             "ncdot_aadt": "active",
             "census": "active",
@@ -173,6 +182,7 @@ def handle_status():
             "center": list(FRANKLIN_STREET_CENTER),
             "radius_meters": 400,
             "venue_source": "OpenStreetMap Overpass API",
+            "busyness_source": "BTUT Fokker-Planck Density Solver",
         },
     }
 
@@ -460,6 +470,46 @@ def handle_forecast(params):
     return build_forecast_report()
 
 
+def handle_density(params):
+    """BTUT density field and convergence diagnostics."""
+    hour = _parse_hour(params.get("hour", [None])[0])
+
+    try:
+        from mfg import get_mfg_engine, collect_signals
+
+        venues = fetch_nearby_places()
+        engine = get_mfg_engine(venues)
+        signals = collect_signals()
+        day = datetime.now().weekday()
+        result = engine.solve_hour(hour, day, signals)
+
+        density_list = result["density_field"].tolist()
+
+        return {
+            "engine": "BTUT v1.0",
+            "algorithm": "Fokker-Planck Mean-Field Game",
+            "equation": "∂ρ/∂t = -∇·(v[ρ]ρ) + σ²/2 Δρ",
+            "hour": hour,
+            "day_of_week": day,
+            "grid_size": len(density_list),
+            "nash_gap": result["nash_gap"],
+            "iterations": result["iterations"],
+            "converged": result["nash_gap"] < 1e-4,
+            "venue_busyness": result["venue_busyness"],
+            "signal_inputs": {
+                k: ("active" if v is not None else "unavailable")
+                for k, v in signals.items()
+            },
+            "density_field": density_list,
+            "heatmap": engine.density_to_heatmap(result["density_field"]),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except ImportError:
+        return {"error": "BTUT engine unavailable (numpy not installed)"}
+    except Exception as e:
+        return {"error": f"BTUT engine error: {str(e)}"}
+
+
 def handle_export(params):
     """Complete data export — all feeds combined."""
     hour = _parse_hour(params.get("hour", [None])[0])
@@ -515,6 +565,7 @@ class DataHandler(BaseHTTPRequestHandler):
             "/osint/transit": handle_transit,
             "/livefeed": handle_livefeed,
             "/forecast": lambda: handle_forecast(params),
+            "/density": lambda: handle_density(params),
             "/report": lambda: handle_report(params),
             "/export": lambda: handle_export(params),
         }
@@ -577,7 +628,8 @@ if __name__ == "__main__":
 
     print()
     print("  ███ FRANKLIN STREET DATA ███")
-    print("  ═══ Datastream API ═══")
+    print("  ═══ Datastream API v4 ═══")
+    print("  ═══ BTUT Mean-Field Game Engine ═══")
     print()
     print(f"  Serving on http://{args.host}:{args.port}")
     print(f"  Docs:      http://localhost:{args.port}/")
@@ -591,6 +643,7 @@ if __name__ == "__main__":
     print("    /trends          Trending search intelligence")
     print("    /intel           Full OSINT briefing")
     print("    /network         Street network topology")
+    print("    /density         BTUT density field + convergence")
     print("    /report          Text surveillance report")
     print("    /export          Complete data export")
     print()

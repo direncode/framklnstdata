@@ -124,6 +124,47 @@ TRIVIA_CATEGORIES = {
     ],
 }
 
+# ---------------------------------------------------------------------------
+# BTUT Mean-Field Game Engine Configuration
+# ---------------------------------------------------------------------------
+
+MFG_CONFIG = {
+    "grid_size": 200,                  # Spatial discretization points along spine
+    "kernel_bandwidth": 0.1,           # Gaussian RBF σ (interaction range)
+    "diffusion": 0.02,                 # σ²/2 exploration noise coefficient
+    "dt": 0.01,                        # Fokker-Planck time step
+    "max_iterations": 150,             # Max steps per hour solve
+    "convergence_threshold": 1e-5,     # Nash gap threshold
+}
+
+# Signal weights for the drift velocity v[ρ]
+MFG_SIGNAL_WEIGHTS = {
+    "venue_attraction": 1.0,           # Base Gaussian pull toward venues
+    "anti_crowding": 0.3,              # Dispersal from density peaks
+    "time_profile": 0.8,               # Hour-of-day venue type modulation
+    "trends_boost": 0.15,              # Google Trends interest amplification
+    "weather_damping": 0.2,            # Bad weather reduces drift magnitude
+    "event_surge": 0.25,               # UNC event proximity boost
+    "day_of_week": 0.4,                # Weekend vs weekday multiplier
+}
+
+# Typical hourly activity profiles by venue type (0-100, index = hour 0-23)
+MFG_VENUE_PROFILES = {
+    "bar":        [0,0,0,0,0,0,0,0,0,5,10,15,15,15,15,20,30,50,70,85,95,100,90,60],
+    "restaurant": [0,0,0,0,0,0,5,10,15,20,40,70,85,80,50,30,40,70,90,85,70,50,30,10],
+    "cafe":       [0,0,0,0,0,5,20,60,80,90,85,70,60,50,45,40,30,20,10,5,0,0,0,0],
+    "nightclub":  [0,0,0,0,0,0,0,0,0,0,0,5,5,5,5,10,15,25,40,60,80,95,100,80],
+    "pub":        [0,0,0,0,0,0,0,0,0,5,10,25,40,35,30,35,45,60,75,85,90,80,60,30],
+    "fast_food":  [0,0,0,0,0,5,10,20,30,25,30,60,80,60,40,35,40,55,65,60,50,40,30,15],
+}
+
+# Day-of-week multipliers (Mon=0 through Sun=6)
+MFG_DAY_MULTIPLIERS = [0.5, 0.5, 0.6, 0.7, 0.9, 1.0, 0.8]
+
+# ---------------------------------------------------------------------------
+# Local Relevance Filtering
+# ---------------------------------------------------------------------------
+
 # Keywords that indicate relevance to UNC / Chapel Hill / NC area
 # Used to filter national trending searches for local relevance
 LOCAL_RELEVANCE_KEYWORDS = [

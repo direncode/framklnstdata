@@ -370,52 +370,47 @@ def get_ncdot_traffic():
 
 def build_heatmap_data(spots, hour=None, day_of_week=None):
     """
-    Build heat map from venue busyness data.
+    Build heat map from BTUT density field or venue busyness data.
 
-    Simple and honest:
-    1. Each venue with live busyness (Google Places) → point with real weight
-    2. Each OSM-discovered venue → point (we know it exists, weight = existence)
-    3. Linear interpolation between venues along the street spine
-       so the heat map shows a corridor, not isolated blobs
+    Primary: Uses the Fokker-Planck density field ρ(x,t) from the BTUT
+    Mean-Field Game engine for a continuous traffic corridor.
 
-    When Google Places API is unavailable, the heat map only shows
-    venue locations (existence) not busyness intensity.
+    Fallback: Per-venue interpolation along the street spine.
 
     Returns list of [lat, lon, weight] for folium.plugins.HeatMap.
     """
     if hour is None:
         hour = datetime.now().hour
 
-    heatmap_points = []
-    venue_weights = {}  # {(lat, lon): weight} for interpolation
+    # --- Primary: BTUT density field (continuous, much richer) ---
+    try:
+        from mfg import get_mfg_engine, collect_signals
+        osm_venues = fetch_nearby_places()
+        if osm_venues:
+            engine = get_mfg_engine(osm_venues)
+            signals = collect_signals()
+            day = day_of_week if day_of_week is not None else datetime.now().weekday()
+            result = engine.solve_hour(hour, day, signals)
+            heatmap = engine.density_to_heatmap(result["density_field"])
+            if heatmap:
+                return heatmap
+    except Exception:
+        pass
 
-    # 1. Curated spots — use live busyness if available, else just mark location
+    # --- Fallback: venue-based interpolation ---
+    heatmap_points = []
+    venue_weights = {}
+
     for spot in spots:
-        busyness = get_current_busyness(
-            spot["name"], spot.get("place_id"), hour=hour,
-        )
-        if busyness is not None:
-            # Real data from Google Places API
+        busyness = spot.get("busyness")
+        if busyness is not None and busyness > 0:
             weight = busyness / 100.0
         else:
-            # No busyness data — just mark that a venue exists here
             weight = 0.3
         venue_weights[(spot["lat"], spot["lon"])] = weight
         heatmap_points.append([spot["lat"], spot["lon"], weight])
 
-    # 2. OSM-discovered venues — existence signal only
-    try:
-        osm_places = fetch_nearby_places()
-        for place in osm_places:
-            # We know a venue is here. That's all we know.
-            venue_weights[(place["lat"], place["lon"])] = 0.2
-            heatmap_points.append([place["lat"], place["lon"], 0.2])
-    except Exception:
-        pass
-
-    # 3. Interpolate along the Franklin Street spine
-    #    Linear blend between nearest venue weights on each side.
-    #    This creates a continuous corridor instead of isolated dots.
+    # Interpolate along the Franklin Street spine
     for i in range(len(FRANKLIN_STREET_SPINE) - 1):
         lat1, lon1 = FRANKLIN_STREET_SPINE[i]
         lat2, lon2 = FRANKLIN_STREET_SPINE[i + 1]
@@ -423,7 +418,6 @@ def build_heatmap_data(spots, hour=None, day_of_week=None):
         w1 = _nearest_weight(lat1, lon1, venue_weights)
         w2 = _nearest_weight(lat2, lon2, venue_weights)
 
-        # 4 intermediate points per segment, linearly blended
         for j in range(1, 5):
             t = j / 5.0
             lat_mid = lat1 + t * (lat2 - lat1)
