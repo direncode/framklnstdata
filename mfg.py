@@ -607,6 +607,12 @@ class FranklinStreetMFG:
             for name, raw in raw_values.items():
                 busyness = int(round(((raw - min_val) / spread) * 100))
                 busyness = max(0, min(100, busyness))
+                # Cap by venue type time profile — supermarket can't be 90% at 1am
+                vtype = self.venue_types.get(name, "restaurant")
+                profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES.get("restaurant"))
+                if profile and isinstance(profile, list):
+                    profile_cap = max(profile[hour % 24], 5)  # Floor at 5%
+                    busyness = min(busyness, profile_cap)
                 result[name] = {"busyness": busyness}
 
         # --- Off-spine venues: time-profile based busyness ---

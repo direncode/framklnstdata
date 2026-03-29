@@ -156,7 +156,9 @@ export default function CommandPanel({ hour }: { hour: number }) {
                 Live Interest by Venue Type
               </div>
               <div className="space-y-3">
-                {topSearches.map((s) => {
+                {topSearches
+                  .filter((s) => s.score > 5)
+                  .map((s) => {
                   const color = intensityColor(s.score);
                   return (
                     <div key={s.venue_type}>
@@ -175,8 +177,8 @@ export default function CommandPanel({ hour }: { hour: number }) {
                     </div>
                   );
                 })}
-                {topSearches.length === 0 && (
-                  <div className="text-xs text-[#454a58]">No search data available</div>
+                {topSearches.filter((s) => s.score > 5).length === 0 && (
+                  <div className="text-xs text-[#454a58]">No significant activity at this hour</div>
                 )}
               </div>
             </div>
