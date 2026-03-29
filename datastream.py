@@ -742,6 +742,14 @@ if __name__ == "__main__":
 
     import signal
 
+    # Start background signal collection immediately at boot
+    try:
+        from spots import _start_background_signals
+        _start_background_signals()
+        print("  [*] Background signal collection started at boot")
+    except Exception as e:
+        print(f"  [!] Could not start background signals: {e}")
+
     server = ThreadingHTTPServer((args.host, args.port), DataHandler)
 
     def graceful_shutdown(signum, frame):

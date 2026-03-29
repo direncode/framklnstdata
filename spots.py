@@ -38,14 +38,16 @@ def _start_background_signals():
     def _collect():
         global _bg_signals_started
         try:
+            import sys
             import mfg
-            print("  [*] Background: collecting live signals...")
+            print("  [*] Background: collecting live signals...", flush=True)
             signals = mfg.collect_signals()
-            mfg._signals_cache["latest"] = signals  # Write to module-level dict
+            mfg._signals_cache["latest"] = signals
             active = sum(1 for v in signals.values() if v is not None)
-            print(f"  [+] Background: {active} signals ready")
+            print(f"  [+] Background: {active}/{len(signals)} signals ready", flush=True)
+            sys.stdout.flush()
         except Exception as e:
-            print(f"  [!] Background signal error: {e}")
+            print(f"  [!] Background signal error: {e}", flush=True)
         finally:
             _bg_signals_started = False
 

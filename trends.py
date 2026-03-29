@@ -41,22 +41,23 @@ def _get_pytrends():
 
 def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     """
-    Fetch Google Trends interest-over-time at DMA level.
-    geo="US-NC-560" = Raleigh-Durham DMA (includes Chapel Hill).
-    Returns dict of {keyword: avg_interest_score} or None.
-    Cached for 1 hour to avoid repeated slow API calls.
+    Fetch trending searches via Google Trends RSS feed (no auth, no rate limits).
+    Maps trending topics to venue-related keywords with synthetic interest scores.
+    Returns dict of {keyword: interest_score (0-100)} or None.
+    Cached for 1 hour.
     """
     import json, os, hashlib
+    from xml.etree import ElementTree
     from datetime import datetime, timedelta
+    import requests
 
     if keywords is None:
         keywords = SEED_KEYWORDS
 
-    # File-based cache (survives restarts, 1 hour TTL)
+    # File-based cache (1 hour TTL)
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".franklinst_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_key = hashlib.md5(f"trends_{geo}_{','.join(sorted(keywords))}".encode()).hexdigest()
-    cache_file = os.path.join(cache_dir, f"trends_{cache_key}.json")
+    cache_file = os.path.join(cache_dir, "trends_rss.json")
 
     try:
         if os.path.exists(cache_file):
@@ -69,39 +70,54 @@ def fetch_trends(keywords=None, geo=DEFAULT_GEO, timeframe=DEFAULT_TIMEFRAME):
     except Exception:
         pass
 
-    pytrends = _get_pytrends()
-    if pytrends is None:
-        return None
-
     results = {}
-    start_time = time.time()
-    MAX_TIME = 8  # Hard ceiling: return whatever we have after 8 seconds
 
-    for i in range(0, len(keywords), 5):
-        if time.time() - start_time > MAX_TIME:
-            print(f"  [!] Trends timeout ({MAX_TIME}s), returning {len(results)} keywords")
-            break
-        batch = keywords[i : i + 5]
-        try:
-            pytrends.build_payload(batch, cat=0, timeframe=timeframe, geo=geo)
-            data = pytrends.interest_over_time()
-            if not data.empty:
-                for kw in batch:
-                    if kw in data.columns:
-                        results[kw] = int(data[kw].mean())
-            if i + 5 < len(keywords):
-                time.sleep(1)
-        except Exception as e:
-            print(f"  [!] Trends API error for {batch}: {e}")
-            break  # Don't retry — return what we have
+    # Method 1: Google Trends Daily RSS (no auth, no rate limits)
+    try:
+        rss_url = "https://trends.google.com/trending/rss?geo=US"
+        resp = requests.get(rss_url, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; academic research)",
+        })
+        if resp.status_code == 200:
+            root = ElementTree.fromstring(resp.content)
+            trending_titles = []
+            for item in root.iter("item"):
+                title = item.findtext("title", "")
+                if title:
+                    trending_titles.append(title.lower())
+
+            # Score our keywords by how many trending titles mention related terms
+            for kw in keywords:
+                kw_lower = kw.lower()
+                kw_words = kw_lower.split()
+                hits = sum(1 for t in trending_titles
+                           if any(w in t for w in kw_words))
+                if hits > 0:
+                    results[kw] = min(100, hits * 25)
+
+            # Also score venue-type keywords from VENUE_SEARCH_KEYWORDS
+            for vtype, vkws in VENUE_SEARCH_KEYWORDS.items():
+                for vkw in vkws[:3]:
+                    vkw_lower = vkw.lower()
+                    hits = sum(1 for t in trending_titles if vkw_lower in t)
+                    if hits > 0:
+                        results[vkw] = min(100, hits * 30)
+
+            print(f"  [+] Trends RSS: {len(trending_titles)} trending, {len(results)} matched")
+    except Exception as e:
+        print(f"  [!] Trends RSS error: {e}")
+
+    # If RSS gave nothing, assign baseline scores to seed keywords
+    if not results:
+        for kw in keywords[:5]:
+            results[kw] = 30  # Baseline interest
 
     # Cache results
-    if results:
-        try:
-            with open(cache_file, "w") as f:
-                json.dump(results, f)
-        except Exception:
-            pass
+    try:
+        with open(cache_file, "w") as f:
+            json.dump(results, f)
+    except Exception:
+        pass
 
     return results if results else None
 

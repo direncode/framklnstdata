@@ -862,6 +862,8 @@ def collect_signals() -> dict:
     except Exception as e:
         print(f"    [sig] demographics: {e}")
 
+    import sys
+    sys.stdout.flush()
     return signals
 
 
