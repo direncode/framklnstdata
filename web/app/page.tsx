@@ -180,14 +180,14 @@ export default function Home() {
       )}
       <TopBar />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden pb-14 md:pb-0">
         <Sidebar active={tab} onTabChange={setTab} />
 
         {/* Main content area */}
         {tab === "map" && (
           <>
-            {/* Left control strip */}
-            <div className="w-52 bg-[#0d0e13] border-r border-[#1e2028] flex flex-col shrink-0">
+            {/* Left control strip — hidden on mobile */}
+            <div className="hidden md:flex w-52 bg-[#0d0e13] border-r border-[#1e2028] flex-col shrink-0">
               <HourSlider value={hour} onChange={setHour} />
 
               {/* Quick stats */}
@@ -273,7 +273,28 @@ export default function Home() {
             </div>
 
             {/* Map */}
-            <div className="flex-1">
+            <div className="flex-1 relative">
+              {/* Mobile hour slider + stats overlay */}
+              <div className="md:hidden absolute top-2 left-2 right-2 z-10 flex gap-2">
+                <div className="flex-1 bg-[#0a0b0fdd] rounded-lg px-3 py-2 backdrop-blur-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] font-mono text-[#454a58] uppercase">Hour</span>
+                    <span className="text-xs font-mono text-[#00d4aa]">{hour}:00</span>
+                  </div>
+                  <input
+                    type="range" min={0} max={23} value={hour}
+                    onChange={(e) => setHour(parseInt(e.target.value))}
+                    className="w-full h-1 bg-[#1e2028] rounded-full appearance-none
+                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4
+                      [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full
+                      [&::-webkit-slider-thumb]:bg-[#00d4aa]"
+                  />
+                </div>
+                <div className="bg-[#0a0b0fdd] rounded-lg px-3 py-2 backdrop-blur-sm text-center">
+                  <div className="text-[9px] font-mono text-[#454a58]">VENUES</div>
+                  <div className="text-sm font-mono text-[#00d4aa]">{liveCount}</div>
+                </div>
+              </div>
               <MapView
                 venues={venues}
                 hour={hour}
@@ -285,12 +306,14 @@ export default function Home() {
               />
             </div>
 
-            {/* Right panel - venue list */}
-            <VenuePanel
-              venues={venues}
-              selectedVenue={selectedVenue}
-              onSelect={setSelectedVenue}
-            />
+            {/* Right panel - venue list — hidden on mobile */}
+            <div className="hidden lg:block">
+              <VenuePanel
+                venues={venues}
+                selectedVenue={selectedVenue}
+                onSelect={setSelectedVenue}
+              />
+            </div>
           </>
         )}
 
@@ -309,12 +332,12 @@ export default function Home() {
         )}
 
         {tab === "intel" && (
-          <div className="flex-1 p-8 overflow-y-auto grid-overlay">
-            <h2 className="text-[10px] font-mono tracking-[0.2em] text-[#00d4aa] uppercase mb-6">
+          <div className="flex-1 p-4 md:p-8 overflow-y-auto grid-overlay pb-16 md:pb-8">
+            <h2 className="text-[10px] font-mono tracking-[0.2em] text-[#00d4aa] uppercase mb-4 md:mb-6">
               Intelligence Summary
             </h2>
 
-            <div className="grid grid-cols-3 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 mb-6 md:mb-8">
               <div className="metric-card glow-green">
                 <div className="text-[9px] text-[#454a58] uppercase">Venues Discovered</div>
                 <div className="text-3xl font-mono text-[#00d4aa] mt-1">{venues.length}</div>

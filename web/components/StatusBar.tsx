@@ -10,7 +10,7 @@ export default function StatusBar({
   apiConnected: boolean;
 }) {
   return (
-    <div className="h-7 flex items-center justify-between px-4 border-t border-[#1e2028] bg-[#0d0e13] text-[9px] font-mono text-[#454a58] shrink-0">
+    <div className="hidden md:flex h-7 items-center justify-between px-4 border-t border-[#1e2028] bg-[#0d0e13] text-[9px] font-mono text-[#454a58] shrink-0">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
           <span

@@ -134,9 +134,9 @@ export default function CommandPanel({ hour }: { hour: number }) {
   const warming = !convergence && loading;
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex flex-col md:flex-row overflow-hidden pb-14 md:pb-0">
       {/* Left: Search Trajectories */}
-      <div className="flex-1 overflow-y-auto border-r border-[#1e2028]">
+      <div className="flex-1 overflow-y-auto border-b md:border-b-0 md:border-r border-[#1e2028]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#1e2028] bg-[#0a0b0f]">
           <div className="text-[10px] font-mono tracking-[0.2em] text-[#ff6600] uppercase">
@@ -265,7 +265,7 @@ export default function CommandPanel({ hour }: { hour: number }) {
       </div>
 
       {/* Right: Signal Feed */}
-      <div className="w-72 overflow-y-auto bg-[#0a0b0f] shrink-0">
+      <div className="w-full md:w-72 overflow-y-auto bg-[#0a0b0f] shrink-0">
         <div className="px-4 py-4 border-b border-[#1e2028]">
           <div className="text-[10px] font-mono tracking-[0.2em] text-[#4a9eff] uppercase">
             Signal Feed
