@@ -65,9 +65,8 @@ export default function CommandPanel({ hour }: { hour: number }) {
     setLoading(true);
 
     // Fetch all four in parallel — all are cache-first (instant)
-    const [densRes, convRes, spotsRes, trendsRes] = await Promise.allSettled([
+    const [densRes, spotsRes, trendsRes] = await Promise.allSettled([
       fetch(`${API_BASE}/density?hour=${hour}`).then((r) => r.ok ? r.json() : null),
-      fetch(`${API_BASE}/convergence?hour=${hour}`).then((r) => r.ok ? r.json() : null),
       fetch(`${API_BASE}/spots?hour=${hour}`).then((r) => r.ok ? r.json() : null),
       fetch(`${API_BASE}/trends?live=true`).then((r) => r.ok ? r.json() : null),
     ]);
@@ -80,17 +79,14 @@ export default function CommandPanel({ hour }: { hour: number }) {
 
     if (densRes.status === "fulfilled" && densRes.value) setDensity(densRes.value);
 
-    // Use convergence data if it has venue scores
-    const convData = convRes.status === "fulfilled" ? convRes.value : null;
-    if (convData && convData.venues_with_signal > 0) {
-      setConvergence(convData);
-    } else if (spotsRes.status === "fulfilled" && spotsRes.value) {
-      // Fallback: build from spots busyness — food/drink/entertainment only
+    // Always build from spots data — filtered to food/drink/entertainment only
+    const relevantTypes = new Set([
+      "bar", "restaurant", "cafe", "pub", "fast_food", "nightclub",
+      "ice_cream", "biergarten", "brewery", "wine_bar", "music_venue",
+    ]);
+
+    if (spotsRes.status === "fulfilled" && spotsRes.value) {
       const spots = spotsRes.value?.spots || [];
-      const relevantTypes = new Set([
-        "bar", "restaurant", "cafe", "pub", "fast_food", "nightclub",
-        "ice_cream", "biergarten", "brewery", "wine_bar", "music_venue",
-      ]);
       const typeScores: Record<string, number[]> = {};
       const venueScores: Record<string, number> = {};
       for (const s of spots) {
@@ -138,9 +134,9 @@ export default function CommandPanel({ hour }: { hour: number }) {
   const warming = !convergence && loading;
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex flex-col md:flex-row overflow-hidden pb-14 md:pb-0">
       {/* Left: Search Trajectories */}
-      <div className="flex-1 overflow-y-auto border-r border-[#1e2028]">
+      <div className="flex-1 overflow-y-auto border-b md:border-b-0 md:border-r border-[#1e2028]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#1e2028] bg-[#0a0b0f]">
           <div className="text-[10px] font-mono tracking-[0.2em] text-[#ff6600] uppercase">
@@ -269,7 +265,7 @@ export default function CommandPanel({ hour }: { hour: number }) {
       </div>
 
       {/* Right: Signal Feed */}
-      <div className="w-72 overflow-y-auto bg-[#0a0b0f] shrink-0">
+      <div className="w-full md:w-72 overflow-y-auto bg-[#0a0b0f] shrink-0">
         <div className="px-4 py-4 border-b border-[#1e2028]">
           <div className="text-[10px] font-mono tracking-[0.2em] text-[#4a9eff] uppercase">
             Signal Feed
