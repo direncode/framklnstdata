@@ -219,9 +219,9 @@ class FranklinStreetMFG:
                     trends_boost = max(trends_boost, score / 100.0)
             attraction += trends_boost * w["trends_boost"]
 
-            # Search convergence boost — trending searches pull density toward matching venues
-            search_conv = signals.get("search_convergence") or {}
-            conv_score = search_conv.get(name, 0) / 100.0
+            # Search convergence — trending searches pull density toward matching venue types
+            conv_by_type = signals.get("search_convergence_by_type") or {}
+            conv_score = conv_by_type.get(vtype, 0) / 100.0
             if conv_score > 0:
                 attraction += conv_score * w.get("search_convergence", 0.25)
 
@@ -393,11 +393,14 @@ class FranklinStreetMFG:
                 if not weather.get("is_good_flyering_weather", True):
                     weather_factor = 0.6
 
+        conv_by_type = (signals or {}).get("search_convergence_by_type") or {}
         for name in self.off_spine_venues:
             vtype = self.venue_types.get(name, "restaurant")
             profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES["restaurant"])
             base = profile[hour % 24] / 100.0
-            busyness = int(round(base * day_mult * weather_factor * 100))
+            # Search convergence boost for off-spine venues too
+            conv_boost = 1.0 + (conv_by_type.get(vtype, 0) / 100.0) * 0.3
+            busyness = int(round(base * day_mult * weather_factor * conv_boost * 100))
             busyness = max(0, min(100, busyness))
             result[name] = {"busyness": busyness}
 
@@ -444,27 +447,37 @@ def collect_signals() -> dict:
         "search_convergence": None,
     }
 
-    # Google Trends interest scores
+    # Google Trends — single fetch, reused for both interest + convergence
+    trends_scores = None
     try:
         from trends import fetch_trends
-        from config import SEED_KEYWORDS
-        scores = fetch_trends(keywords=SEED_KEYWORDS[:5])
-        if scores:
-            signals["trends_interest"] = scores
+        from config import SEED_KEYWORDS, VENUE_SEARCH_KEYWORDS
+        # Combine seed keywords + top 2 per venue type (deduplicated)
+        all_kw = list(SEED_KEYWORDS[:5])
+        for vtype_kws in VENUE_SEARCH_KEYWORDS.values():
+            all_kw.extend(vtype_kws[:2])
+        all_kw = list(dict.fromkeys(all_kw))[:20]  # Cap at 20 (4 batches max)
+
+        trends_scores = fetch_trends(keywords=all_kw)
+        if trends_scores:
+            signals["trends_interest"] = trends_scores
     except Exception:
         pass
 
-    # Search convergence (venue-type search trajectory)
-    try:
-        from trends import compute_search_convergence
-        from traffic import fetch_nearby_places
-        venues = fetch_nearby_places()
-        if venues:
-            convergence = compute_search_convergence(venues)
-            if convergence and convergence.get("venue_scores"):
-                signals["search_convergence"] = convergence["venue_scores"]
-    except Exception:
-        pass
+    # Search convergence — reuse already-fetched trends scores (no extra API call)
+    if trends_scores:
+        try:
+            from config import MFG_VENUE_PROFILES
+            venue_type_scores = {}
+            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
+                matching = [trends_scores.get(kw, 0) for kw in kws if kw in trends_scores]
+                if matching:
+                    venue_type_scores[vtype] = sum(matching) / len(matching)
+
+            if venue_type_scores:
+                signals["search_convergence_by_type"] = venue_type_scores
+        except Exception:
+            pass
 
     # Weather
     try:
