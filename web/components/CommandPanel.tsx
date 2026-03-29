@@ -65,9 +65,8 @@ export default function CommandPanel({ hour }: { hour: number }) {
     setLoading(true);
 
     // Fetch all four in parallel — all are cache-first (instant)
-    const [densRes, convRes, spotsRes, trendsRes] = await Promise.allSettled([
+    const [densRes, spotsRes, trendsRes] = await Promise.allSettled([
       fetch(`${API_BASE}/density?hour=${hour}`).then((r) => r.ok ? r.json() : null),
-      fetch(`${API_BASE}/convergence?hour=${hour}`).then((r) => r.ok ? r.json() : null),
       fetch(`${API_BASE}/spots?hour=${hour}`).then((r) => r.ok ? r.json() : null),
       fetch(`${API_BASE}/trends?live=true`).then((r) => r.ok ? r.json() : null),
     ]);
@@ -80,17 +79,14 @@ export default function CommandPanel({ hour }: { hour: number }) {
 
     if (densRes.status === "fulfilled" && densRes.value) setDensity(densRes.value);
 
-    // Use convergence data if it has venue scores
-    const convData = convRes.status === "fulfilled" ? convRes.value : null;
-    if (convData && convData.venues_with_signal > 0) {
-      setConvergence(convData);
-    } else if (spotsRes.status === "fulfilled" && spotsRes.value) {
-      // Fallback: build from spots busyness — food/drink/entertainment only
+    // Always build from spots data — filtered to food/drink/entertainment only
+    const relevantTypes = new Set([
+      "bar", "restaurant", "cafe", "pub", "fast_food", "nightclub",
+      "ice_cream", "biergarten", "brewery", "wine_bar", "music_venue",
+    ]);
+
+    if (spotsRes.status === "fulfilled" && spotsRes.value) {
       const spots = spotsRes.value?.spots || [];
-      const relevantTypes = new Set([
-        "bar", "restaurant", "cafe", "pub", "fast_food", "nightclub",
-        "ice_cream", "biergarten", "brewery", "wine_bar", "music_venue",
-      ]);
       const typeScores: Record<string, number[]> = {};
       const venueScores: Record<string, number> = {};
       for (const s of spots) {
