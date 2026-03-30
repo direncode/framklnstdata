@@ -338,8 +338,23 @@ class FranklinStreetMFG:
         weather_factor = 1.0
         weather = signals.get("weather")
         if weather and isinstance(weather, dict):
-            if not weather.get("is_good_flyering_weather", True):
+            temp = weather.get("temp_f", 70)
+            wind = weather.get("wind_mph", 0)
+            desc = weather.get("description", "").lower()
+            if "rain" in desc or "storm" in desc or "snow" in desc:
+                weather_factor = 0.25
+            elif "drizzle" in desc or "shower" in desc:
                 weather_factor = 0.5
+            elif temp < 32:
+                weather_factor = 0.3
+            elif temp < 45:
+                weather_factor = 0.6
+            elif temp > 95:
+                weather_factor = 0.5
+            elif wind > 25:
+                weather_factor = 0.5
+            elif wind > 15:
+                weather_factor = 0.8
 
         # Trends interest map (keyword -> score 0-100)
         trends_interest = signals.get("trends_interest") or {}
@@ -347,7 +362,7 @@ class FranklinStreetMFG:
         # Event count → surge multiplier
         events = signals.get("events")
         event_count = len(events) if isinstance(events, list) else 0
-        event_surge = min(1.0 + event_count * 0.05, 2.0)  # Cap at 2x
+        event_surge = min(1.0 + event_count * 0.03, 1.5)  # Cap at 1.5x (was 2x)
 
         # Reddit social buzz — which venue types are being talked about
         reddit = signals.get("reddit_activity") or {}
@@ -616,21 +631,40 @@ class FranklinStreetMFG:
                 result[name] = {"busyness": busyness}
 
         # --- Off-spine venues: time-profile based busyness ---
-        day_mult = MFG_DAY_MULTIPLIERS[day % 7] if day is not None else 0.7
+        day_mult = MFG_DAY_MULTIPLIERS[day % 7] if day is not None else 0.5
         weather_factor = 1.0
         if signals:
             weather = signals.get("weather")
             if weather and isinstance(weather, dict):
-                if not weather.get("is_good_flyering_weather", True):
-                    weather_factor = 0.6
+                temp = weather.get("temp_f", 70)
+                wind = weather.get("wind_mph", 0)
+                desc = weather.get("description", "").lower()
+
+                # Graduated weather impact — not just binary
+                if "rain" in desc or "storm" in desc or "snow" in desc:
+                    weather_factor = 0.25  # Heavy precipitation crushes traffic
+                elif "drizzle" in desc or "shower" in desc:
+                    weather_factor = 0.5
+                elif temp < 32:
+                    weather_factor = 0.3   # Freezing
+                elif temp < 45:
+                    weather_factor = 0.6   # Cold
+                elif temp > 95:
+                    weather_factor = 0.5   # Extreme heat
+                elif wind > 25:
+                    weather_factor = 0.5   # High wind
+                elif wind > 15:
+                    weather_factor = 0.8
 
         conv_by_type = (signals or {}).get("search_convergence_by_type") or {}
         news_kw = (signals or {}).get("news_keywords") or {}
-        reddit = (signals or {}).get("reddit_activity") or {}
-        buzz_types = set(reddit.get("buzz_types", []))
-        reddit_score = min(reddit.get("avg_score", 0) / 100.0, 1.0)
         demo = (signals or {}).get("demographics") or {}
         college_mult = demo.get("college_multiplier", 1.0)
+
+        # Event count affects overall activity level
+        events = (signals or {}).get("events")
+        event_count = len(events) if isinstance(events, list) else 0
+        event_mult = 1.0 + min(event_count * 0.03, 0.5)  # Up to 1.5x for many events
 
         for name in self.off_spine_venues:
             # Check if venue is open
@@ -643,15 +677,30 @@ class FranklinStreetMFG:
             profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES["restaurant"])
             base = profile[hour % 24] / 100.0
 
-            # Signal boosts for off-spine venues
-            conv_boost = 1.0 + (conv_by_type.get(vtype, 0) / 100.0) * 0.3
-            buzz_boost = 1.0 + (0.15 if vtype in buzz_types else 0) * reddit_score
-            news_boost = 1.0 + (news_kw.get(vtype, 0) / 100.0) * 0.15
-            evening_mult = college_mult if (hour >= 17 or hour <= 2) else 1.0
+            # If base is 0, venue is essentially inactive at this hour
+            if base < 0.01:
+                result[name] = {"busyness": 0}
+                continue
+
+            # Search convergence — stronger effect
+            conv_score = conv_by_type.get(vtype, 0) / 100.0
+            conv_boost = 1.0 + conv_score * 0.5
+
+            # News boost
+            news_score = news_kw.get(vtype, 0) / 100.0
+            n_boost = 1.0 + news_score * 0.2
+
+            # Evening college crowd (bars/nightclubs/pubs only)
+            nightlife_types = {"bar", "nightclub", "pub", "restaurant"}
+            evening_mult = 1.0
+            if vtype in nightlife_types and (hour >= 19 or hour <= 2):
+                evening_mult = college_mult
+            elif vtype in nightlife_types and 17 <= hour < 19:
+                evening_mult = 1.0 + (college_mult - 1.0) * 0.5  # Half boost early evening
 
             busyness = int(round(
                 base * day_mult * weather_factor * conv_boost
-                * buzz_boost * news_boost * evening_mult * 100
+                * n_boost * evening_mult * event_mult * 100
             ))
             busyness = max(0, min(100, busyness))
             result[name] = {"busyness": busyness}

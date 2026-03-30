@@ -483,13 +483,15 @@ def build_heatmap_data(spots, hour=None, day_of_week=None):
     if hour is None:
         hour = datetime.now().hour
 
-    # Heatmap = venue busyness at venue locations (no spine interpolation)
+    # Heatmap = venue busyness at venue locations
+    # Only show venues with meaningful busyness (>15%) to avoid visual noise
+    # Square the weight to make the heatmap more punishing — 50% shows as 25% heat
     heatmap_points = []
 
     for spot in spots:
         busyness = spot.get("busyness")
-        if busyness is not None and busyness > 0:
-            weight = busyness / 100.0
+        if busyness is not None and busyness > 15:
+            weight = (busyness / 100.0) ** 1.5  # Exponential curve punishes low scores
             heatmap_points.append([spot["lat"], spot["lon"], weight])
 
     return heatmap_points
