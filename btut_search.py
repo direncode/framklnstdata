@@ -429,6 +429,23 @@ def _fetch_local_autocomplete() -> list[str]:
         except Exception:
             continue
 
+    # Fallback: DuckDuckGo Autocomplete (if Google blocked from datacenter)
+    if len(suggestions) < 5:
+        for q in queries[:4]:
+            try:
+                url = f"https://duckduckgo.com/ac/?q={q}"
+                resp = requests.get(url, timeout=5, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                })
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data:
+                        phrase = item.get("phrase", "")
+                        if phrase and phrase != q:
+                            suggestions.append(phrase)
+            except Exception:
+                continue
+
     # Deduplicate
     suggestions = list(dict.fromkeys(suggestions))
 
