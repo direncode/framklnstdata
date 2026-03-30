@@ -682,6 +682,17 @@ class FranklinStreetMFG:
                 result[name] = {"busyness": 0}
                 continue
 
+            # Venue-specific variance — use OSM metadata to differentiate
+            # venues of the same type. Name hash creates consistent per-venue offset.
+            name_hash = sum(ord(c) for c in name) % 100
+            variance = 0.7 + (name_hash / 100.0) * 0.6  # Range: 0.7 to 1.3
+            # Venues with more metadata (phone, website, hours) are likely
+            # more established/popular — boost them
+            venue_data = next((v for v in self.venues if v.get("name") == name), {})
+            metadata_score = sum(1 for k in ["phone", "website", "cuisine", "outdoor_seating"]
+                                if venue_data.get(k))
+            establishment_boost = 1.0 + metadata_score * 0.05  # Up to 1.2x
+
             # Search convergence — stronger effect
             conv_score = conv_by_type.get(vtype, 0) / 100.0
             conv_boost = 1.0 + conv_score * 0.5
@@ -700,7 +711,8 @@ class FranklinStreetMFG:
 
             busyness = int(round(
                 base * day_mult * weather_factor * conv_boost
-                * n_boost * evening_mult * event_mult * 100
+                * n_boost * evening_mult * event_mult
+                * variance * establishment_boost * 100
             ))
             busyness = max(0, min(100, busyness))
             result[name] = {"busyness": busyness}
@@ -732,18 +744,21 @@ class FranklinStreetMFG:
             profile = MFG_VENUE_PROFILES.get(vtype, MFG_VENUE_PROFILES.get("restaurant", [50]*24))
             time_val = profile[hour % 24]
 
-            reasons["time_profile"] = f"{vtype} at {hour}:00 → {time_val}% typical"
+            reasons["time_profile"] = f"{vtype} at {hour}:00 → {time_val}% estimated"
+            reasons["method"] = "Probabilistic estimate (BTUT MFG + live signals)"
 
-            if day_mult < 0.7:
-                reasons["day_of_week"] = f"Weekday dampening ({int(day_mult*100)}%)"
+            if day_mult < 0.5:
+                reasons["day_of_week"] = f"Low weekday ({int(day_mult*100)}% of weekend)"
+            elif day_mult < 0.7:
+                reasons["day_of_week"] = f"Mid-week ({int(day_mult*100)}% of weekend)"
             elif day_mult >= 0.9:
-                reasons["day_of_week"] = f"Weekend boost ({int(day_mult*100)}%)"
+                reasons["day_of_week"] = f"Weekend peak ({int(day_mult*100)}%)"
 
-            if weather.get("is_good_flyering_weather") is False:
-                desc = weather.get("description", "bad weather")
-                reasons["weather"] = f"Bad weather: {desc} → reduced traffic"
-            elif weather.get("description"):
-                reasons["weather"] = f"{weather['description']}, {weather.get('temp_f', '?')}°F"
+            if weather.get("description"):
+                temp = weather.get("temp_f", "?")
+                desc = weather.get("description", "")
+                wind = weather.get("wind_mph", 0)
+                reasons["weather"] = f"{desc}, {temp}°F, wind {wind}mph"
 
             if event_count > 0:
                 reasons["events"] = f"{event_count} UNC events → {min(event_count*5, 100)}% surge"
