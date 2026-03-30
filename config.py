@@ -100,30 +100,50 @@ TREND_AREAS = {
 DEFAULT_TREND_AREA = "chapel_hill"
 
 # Search keyword → venue type mapping for convergence analysis
-# Maps trending search terms to venue categories they predict traffic for
+# ORDERED BY SEMANTIC CLUSTER so kernel diffusion works correctly:
+# Nightlife → Bars → Pubs → Restaurants → Fast Food → Cafes → Dessert →
+# Shopping → Fitness → Entertainment → Lodging → Services
 VENUE_SEARCH_KEYWORDS = {
-    "bar":        ["bars", "nightlife", "drinks", "cocktails", "happy hour", "beer",
-                   "wine bar", "brewery", "craft beer", "karaoke", "pub crawl"],
-    "restaurant": ["restaurants", "dining", "food", "eat", "dinner", "lunch",
-                   "brunch", "sushi", "mexican food", "italian", "thai",
-                   "indian food", "ramen", "steakhouse", "seafood"],
-    "cafe":       ["coffee", "cafe", "espresso", "latte", "study spot", "wifi",
-                   "bakery", "pastry", "tea", "matcha"],
     "nightclub":  ["clubs", "dancing", "DJ", "nightlife", "party", "rave",
                    "EDM", "hip hop night", "ladies night"],
-    "pub":        ["pub", "bar", "beer", "wings", "trivia night", "sports bar",
-                   "game day", "watch party"],
-    "fast_food":  ["fast food", "takeout", "burgers", "pizza", "delivery",
-                   "drive through", "late night food", "cheap eats"],
-    "ice_cream":  ["ice cream", "frozen yogurt", "dessert", "gelato", "sweets"],
-    "supermarket": ["grocery", "supermarket", "food store", "organic"],
-    "fitness_centre": ["gym", "fitness", "workout", "yoga", "crossfit", "pilates"],
-    "cinema":     ["movies", "cinema", "film", "theater", "IMAX", "new movies"],
-    "hotel":      ["hotel", "lodging", "stay", "accommodation", "Airbnb"],
-    "pharmacy":   ["pharmacy", "drugstore", "medicine", "prescription"],
-    "bookstore":  ["books", "bookstore", "reading", "Barnes Noble"],
-    "shopping":   ["shopping", "clothes", "retail", "sale", "outlet", "mall"],
+    "bar":        ["bars", "nightlife", "drinks", "cocktails", "happy hour", "beer",
+                   "wine bar", "brewery", "craft beer", "karaoke", "pub crawl"],
+    "pub":        ["pub", "beer", "wings", "trivia night", "sports bar",
+                   "game day", "watch party", "bar food"],
+    "restaurant": ["restaurants", "dining", "food", "eat", "dinner", "lunch",
+                   "brunch", "sushi", "mexican food", "italian", "thai",
+                   "indian food", "ramen", "steakhouse", "seafood", "pizza",
+                   "chinese food", "mediterranean", "korean bbq", "pho"],
+    "fast_food":  ["fast food", "takeout", "burgers", "delivery",
+                   "drive through", "late night food", "cheap eats", "wings"],
+    "cafe":       ["coffee", "cafe", "espresso", "latte", "study spot", "wifi",
+                   "bakery", "pastry", "tea", "matcha", "brunch"],
+    "ice_cream":  ["ice cream", "frozen yogurt", "dessert", "gelato", "sweets",
+                   "cookies", "bubble tea", "smoothie"],
+    "supermarket": ["grocery", "supermarket", "food store", "organic", "whole foods"],
+    "fitness_centre": ["gym", "fitness", "workout", "yoga", "crossfit", "pilates",
+                       "running", "basketball courts", "climbing"],
+    "cinema":     ["movies", "cinema", "film", "theater", "IMAX", "new movies",
+                   "showtimes", "movie tickets"],
+    "hotel":      ["hotel", "lodging", "stay", "accommodation", "Airbnb",
+                   "bed and breakfast"],
+    "pharmacy":   ["pharmacy", "drugstore", "medicine", "prescription", "CVS"],
+    "bookstore":  ["books", "bookstore", "reading", "Barnes Noble", "comics"],
+    "shopping":   ["shopping", "clothes", "retail", "sale", "outlet", "mall",
+                   "vintage", "thrift store"],
 }
+
+# Chapel Hill specific search terms (discovered dynamically + seed list)
+# These are locality-bound and map to multiple venue types
+CHAPEL_HILL_SEARCH_TERMS = [
+    "franklin street", "chapel hill restaurants", "chapel hill bars",
+    "chapel hill nightlife", "unc chapel hill", "carrboro",
+    "best food chapel hill", "late night chapel hill", "brunch chapel hill",
+    "happy hour chapel hill", "live music chapel hill", "study spots chapel hill",
+    "date night chapel hill", "cheap eats chapel hill", "food truck chapel hill",
+    "things to do chapel hill", "events tonight chapel hill",
+    "open now chapel hill", "delivery chapel hill",
+]
 
 SEED_KEYWORDS = [
     "UNC basketball",

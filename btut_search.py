@@ -100,21 +100,23 @@ def compute_keyword_signals(
     grid: list[KeywordAgent],
     events: list[dict] | None,
     rss_titles: list[str] | None,
+    autocomplete: list[str] | None,
     hour: int,
     weather: dict | None,
 ) -> np.ndarray:
     """Compute raw signal score S(j) for each keyword position.
 
-    Fuses:
+    Fuses 5 signal sources:
       1. UNC Events text matching
       2. Google Trends RSS title matching
-      3. Time-of-day baseline from venue profiles
-      4. Weather modulation
+      3. Google Autocomplete local suggestions (KEY LOCAL SIGNAL)
+      4. Time-of-day baseline from venue profiles
+      5. Weather modulation
     """
     n = len(grid)
     scores = np.zeros(n)
 
-    # Build event text corpus
+    # Build corpora
     event_text = ""
     if events:
         event_text = " ".join(
@@ -122,19 +124,21 @@ def compute_keyword_signals(
             for e in events
         ).lower()
 
-    # Build RSS title corpus
     rss_text = ""
     if rss_titles:
         rss_text = " ".join(rss_titles).lower()
+
+    # Google Autocomplete — what people ACTUALLY search for Chapel Hill
+    autocomplete_text = ""
+    if autocomplete:
+        autocomplete_text = " ".join(autocomplete).lower()
 
     # Weather modulation
     is_bad_weather = False
     if weather and isinstance(weather, dict):
         is_bad_weather = not weather.get("is_good_flyering_weather", True)
 
-    # Indoor venue types (boosted in bad weather)
     indoor_types = {"cafe", "cinema", "library", "fitness_centre", "shop", "supermarket"}
-    # Outdoor-sensitive types (dampened in bad weather)
     outdoor_types = {"bar", "nightclub", "pub", "fast_food"}
 
     for agent in grid:
@@ -152,12 +156,19 @@ def compute_keyword_signals(
             hits = rss_text.count(kw_lower)
             score += min(hits * 20, 40)
 
-        # 3. Time-of-day baseline (0-30)
+        # 3. Autocomplete signal (0-50) — THE KEY LOCAL SIGNAL
+        # If people are actively typing "chapel hill [keyword]" into Google,
+        # that keyword is genuinely trending locally RIGHT NOW
+        if autocomplete_text and kw_lower in autocomplete_text:
+            hits = autocomplete_text.count(kw_lower)
+            score += min(hits * 25, 50)
+
+        # 4. Time-of-day baseline (0-30)
         profile = MFG_VENUE_PROFILES.get(vtype)
         if profile and isinstance(profile, list) and len(profile) > hour:
             score += profile[hour % 24] * 0.3
 
-        # 4. Weather modulation
+        # 5. Weather modulation
         if is_bad_weather:
             if vtype in indoor_types:
                 score *= 1.3
@@ -367,6 +378,71 @@ def _fetch_rss_titles() -> list[str]:
     return titles
 
 
+def _fetch_local_autocomplete() -> list[str]:
+    """Fetch Google Autocomplete suggestions for Chapel Hill queries.
+
+    This is the key LOCAL signal — it returns what people ACTUALLY
+    type into Google right now when searching for Chapel Hill venues.
+    Free, no auth, no rate limits, ~200ms response time.
+    Cached 30 minutes.
+    """
+    import requests
+
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), CACHE_DIR)
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, "autocomplete_local.json")
+
+    try:
+        if os.path.exists(cache_file):
+            mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+            if (datetime.now() - mtime) < timedelta(minutes=30):
+                with open(cache_file) as f:
+                    return json.load(f)
+    except Exception:
+        pass
+
+    suggestions = []
+    # Query Google Autocomplete for Chapel Hill venue-related searches
+    queries = [
+        "chapel hill",
+        "chapel hill restaurants",
+        "chapel hill bars",
+        "chapel hill things to do",
+        "franklin street chapel hill",
+        "best food chapel hill",
+        "unc chapel hill events",
+        "carrboro",
+    ]
+
+    for q in queries:
+        try:
+            url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={q}"
+            resp = requests.get(url, timeout=5, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 1:
+                    for s in data[1]:
+                        if s and s != q:
+                            suggestions.append(s)
+        except Exception:
+            continue
+
+    # Deduplicate
+    suggestions = list(dict.fromkeys(suggestions))
+
+    if suggestions:
+        try:
+            with open(cache_file, "w") as f:
+                json.dump(suggestions, f)
+        except Exception:
+            pass
+        print(f"  [+] Autocomplete: {len(suggestions)} local suggestions")
+
+    return suggestions
+
+
 # ---------------------------------------------------------------------------
 # Top-Level Solver
 # ---------------------------------------------------------------------------
@@ -395,15 +471,18 @@ def solve_keyword_mfg(
     grid = _get_grid()
     config = KeywordMFGConfig.from_dict(KEYWORD_MFG_CONFIG)
 
-    # Fetch RSS titles (cached 30 min)
+    # Fetch both signal sources (cached 30 min each)
     rss_titles = _fetch_rss_titles()
+    autocomplete = _fetch_local_autocomplete()
 
     # Filter RSS for local relevance
     local_rss = [t for t in rss_titles
                  if any(kw in t.lower() for kw in LOCAL_RELEVANCE_KEYWORDS)]
 
-    # Compute raw signals
-    signals = compute_keyword_signals(grid, events, rss_titles, hour, weather)
+    # Compute raw signals (5 sources now)
+    signals = compute_keyword_signals(
+        grid, events, rss_titles, autocomplete, hour, weather,
+    )
 
     # Run Fokker-Planck
     density, nash_gap, iterations = keyword_fokker_planck(signals, config)
@@ -431,6 +510,24 @@ def solve_keyword_mfg(
                 "venue_type": vtype,
                 "trajectory": trajectories.get(kw, "stable"),
                 "source": "BTUT Keyword MFG",
+            })
+
+    # Add Google Autocomplete discoveries (REAL local search data)
+    if autocomplete:
+        for suggestion in autocomplete[:8]:
+            # Match suggestion to venue type
+            s_lower = suggestion.lower()
+            matched_type = "local"
+            for vtype, kws in VENUE_SEARCH_KEYWORDS.items():
+                if any(kw.lower() in s_lower for kw in kws[:5]):
+                    matched_type = vtype
+                    break
+            local_topics.append({
+                "keyword": suggestion,
+                "score": 75,
+                "venue_type": matched_type,
+                "trajectory": "stable",
+                "source": "Google Autocomplete",
             })
 
     # Add locally-relevant RSS topics
