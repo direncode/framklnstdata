@@ -257,6 +257,10 @@ KEYWORD_MFG_CONFIG = {
     "anti_crowding": 0.2,              # Prevents keyword monoculture
 }
 
+# Ticketmaster Discovery API (free key, 5000 calls/day)
+# Sign up at developer.ticketmaster.com for instant free key
+TICKETMASTER_API_KEY = os.environ.get("TICKETMASTER_API_KEY", "")
+
 # Fallback operating hours when OSM opening_hours is missing
 # Format: (open_hour, close_hour) — used to zero out busyness for closed venues
 MFG_FALLBACK_HOURS = {

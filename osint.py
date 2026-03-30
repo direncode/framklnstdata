@@ -163,6 +163,91 @@ def fetch_crime_data():
 # Reddit - UNC/Chapel Hill Live Feed
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Ticketmaster Discovery API — Real-Time Event Data
+# ---------------------------------------------------------------------------
+
+def fetch_ticketmaster_events():
+    """
+    Fetch events near Chapel Hill from Ticketmaster Discovery API.
+    Free tier: 5000 calls/day. Returns events with dates, venues,
+    ticket status (onsale/offsale), and categories.
+
+    This is REAL measured data — ticket availability changes in real-time.
+    Returns list of event dicts or None.
+    """
+    from config import TICKETMASTER_API_KEY
+
+    if not TICKETMASTER_API_KEY:
+        return None
+
+    cached = _read_cache("ticketmaster_events", max_age_hours=1)
+    if cached:
+        return cached
+
+    lat, lon = FRANKLIN_STREET_CENTER
+    today = datetime.now().strftime("%Y-%m-%dT00:00:00Z")
+
+    url = (
+        f"https://app.ticketmaster.com/discovery/v2/events.json"
+        f"?apikey={TICKETMASTER_API_KEY}"
+        f"&latlong={lat},{lon}"
+        f"&radius=15&unit=miles"
+        f"&startDateTime={today}"
+        f"&size=50&sort=date,asc"
+    )
+
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        events = []
+        embedded = data.get("_embedded", {})
+        for event in embedded.get("events", []):
+            venue_info = {}
+            venues = event.get("_embedded", {}).get("venues", [])
+            if venues:
+                v = venues[0]
+                venue_info = {
+                    "venue_name": v.get("name", ""),
+                    "venue_lat": v.get("location", {}).get("latitude"),
+                    "venue_lon": v.get("location", {}).get("longitude"),
+                    "venue_city": v.get("city", {}).get("name", ""),
+                }
+
+            # Ticket status is the real-time signal
+            ticket_status = "unknown"
+            sales = event.get("sales", {}).get("public", {})
+            if sales.get("startDateTime"):
+                ticket_status = "onsale" if sales.get("startTBD") is not True else "tbd"
+
+            dates = event.get("dates", {}).get("start", {})
+
+            events.append({
+                "name": event.get("name", ""),
+                "date": dates.get("localDate", ""),
+                "time": dates.get("localTime", ""),
+                "type": event.get("type", ""),
+                "genre": (event.get("classifications", [{}])[0]
+                          .get("genre", {}).get("name", "")
+                          if event.get("classifications") else ""),
+                "ticket_status": ticket_status,
+                "url": event.get("url", ""),
+                **venue_info,
+            })
+
+        if events:
+            _write_cache("ticketmaster_events", events)
+            print(f"  [+] Ticketmaster: {len(events)} events near Chapel Hill")
+
+        return events if events else None
+
+    except Exception as e:
+        print(f"  [!] Ticketmaster error: {e}")
+        return None
+
+
 def fetch_reddit_posts(subreddit="UNC", limit=25):
     """
     Fetch recent posts from r/UNC and r/chapelhill via Reddit JSON API.

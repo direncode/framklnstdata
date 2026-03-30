@@ -397,6 +397,34 @@ class FranklinStreetMFG:
                     crime_damping[lo:hi] *= 0.95  # Each incident reduces by 5%
             crime_damping = np.maximum(crime_damping, 0.5)  # Floor at 50%
 
+        # Ticketmaster event boost — REAL measured data
+        # Events happening TODAY at venues near the spine get a strong boost
+        tm_boost = np.zeros(n)
+        tm_events = signals.get("ticketmaster_events")
+        if tm_events and isinstance(tm_events, list):
+            today = datetime.now().strftime("%Y-%m-%d")
+            for ev in tm_events:
+                if ev.get("date") != today:
+                    continue
+                elat = ev.get("venue_lat")
+                elon = ev.get("venue_lon")
+                if elat and elon:
+                    try:
+                        eidx = self._nearest_grid_index(float(elat), float(elon))
+                        lo = max(0, eidx - 8)
+                        hi = min(n, eidx + 9)
+                        # Concert/sports event creates strong pull
+                        genre = ev.get("genre", "").lower()
+                        boost = 0.3  # Base event boost
+                        if "music" in genre or "rock" in genre or "hip" in genre:
+                            boost = 0.5  # Music events pull more foot traffic
+                        elif "sport" in genre or "basketball" in genre:
+                            boost = 0.6  # Sports events are massive
+                        tm_boost[lo:hi] += boost
+                    except (ValueError, TypeError):
+                        pass
+            tm_boost = np.minimum(tm_boost, 1.0)
+
         # News keyword boost by venue type
         news_kw = signals.get("news_keywords") or {}
 
@@ -446,6 +474,9 @@ class FranklinStreetMFG:
 
             # Transit accessibility boost at this grid position
             attraction += transit_boost[idx] * w.get("transit_access", 0.15)
+
+            # Ticketmaster event boost at this grid position (REAL DATA)
+            attraction += tm_boost[idx] * 0.4
 
             # Apply day and weather modulation
             attraction *= day_mult * w["day_of_week"]
@@ -773,6 +804,14 @@ class FranklinStreetMFG:
             if vtype in news_kw:
                 reasons["news"] = f"Daily Tar Heel mentions {vtype} ({news_kw[vtype]}% match)"
 
+            # Ticketmaster events nearby (REAL DATA)
+            tm_evts = signals.get("ticketmaster_events") or []
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_evts = [e for e in tm_evts if e.get("date") == today]
+            if today_evts:
+                evt_names = [e.get("name", "")[:40] for e in today_evts[:3]]
+                reasons["live_events"] = f"{len(today_evts)} events today: {', '.join(evt_names)}"
+
             # Check if closed
             is_open_fn = self.venue_hours.get(name)
             if is_open_fn and not is_open_fn(day if day is not None else 0, hour):
@@ -869,7 +908,18 @@ def collect_signals() -> dict:
     except Exception as e:
         print(f"    [sig] keyword MFG: {e}")
 
-    # --- 5. Reddit — removed (rate limited on Fly.io) ---
+    # --- 5. Ticketmaster events (real-time ticket data, free key) ---
+    try:
+        from osint import fetch_ticketmaster_events
+        tm_events = fetch_ticketmaster_events()
+        if tm_events:
+            signals["ticketmaster_events"] = tm_events
+            # Count events happening TODAY
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_events = [e for e in tm_events if e.get("date") == today]
+            print(f"    [sig] ticketmaster: {len(tm_events)} events ({len(today_events)} today)")
+    except Exception as e:
+        print(f"    [sig] ticketmaster: {e}")
 
     # --- 6. Transit stop density (hardcoded Chapel Hill major stops) ---
     # Overpass API gets rate limited when queried alongside venue discovery.
