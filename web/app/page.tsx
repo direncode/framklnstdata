@@ -108,20 +108,58 @@ export default function Home() {
   const [trafficHeatmap, setTrafficHeatmap] = useState<HeatmapPoint[]>([]);
   const [searchHeatmap, setSearchHeatmap] = useState<HeatmapPoint[]>([]);
 
-  // Global expansion state
+  // Global expansion state — layers default ON
   const [displayMode, setDisplayMode] = useState<DisplayMode>("normal");
   const [cameras, setCameras] = useState<CameraPoint[]>([]);
-  const [showCameras, setShowCameras] = useState(false);
+  const [showCameras, setShowCameras] = useState(true);
   const [aircraft, setAircraft] = useState<AircraftPoint[]>([]);
-  const [showAircraft, setShowAircraft] = useState(false);
+  const [showAircraft, setShowAircraft] = useState(true);
   const [satellites, setSatellites] = useState<SatellitePoint[]>([]);
-  const [showSatellites, setShowSatellites] = useState(false);
+  const [showSatellites, setShowSatellites] = useState(true);
   const [satelliteTracks, setSatelliteTracks] = useState<any[]>([]);
   const [selectedGIBSLayer, setSelectedGIBSLayer] = useState<string | null>(null);
   const [showGIBS, setShowGIBS] = useState(false);
   const [gibsLayerUrl, setGibsLayerUrl] = useState<string | null>(null);
 
   // --- Data Fetching ---
+
+  const fetchCameras = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/cameras`);
+      if (res.ok) {
+        const data = await res.json();
+        setCameras(data.cameras || []);
+      }
+    } catch { /* empty */ }
+  }, []);
+
+  const fetchAircraft = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/aircraft?region=chapel_hill`);
+      if (res.ok) {
+        const data = await res.json();
+        setAircraft(data.aircraft || []);
+      }
+    } catch { /* empty */ }
+  }, []);
+
+  const fetchSatellites = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/satellites?category=stations,visual`);
+      if (res.ok) {
+        const data = await res.json();
+        // Extract positions from geojson features
+        const sats: SatellitePoint[] = (data.geojson?.features || []).map((f: any) => ({
+          name: f.properties.name,
+          norad_id: f.properties.norad_id,
+          lat: f.geometry.coordinates[1],
+          lon: f.geometry.coordinates[0],
+          alt_km: f.properties.alt_km,
+        }));
+        setSatellites(sats);
+      }
+    } catch { /* empty */ }
+  }, []);
 
   const fetchVenues = useCallback(async () => {
     setLoading(true);
@@ -207,12 +245,25 @@ export default function Home() {
     } catch { /* empty */ }
   }, []);
 
-  // Effects
+  // Effects — fetch all data on mount
   useEffect(() => { fetchVenues(); }, [fetchVenues]);
   useEffect(() => { fetchHeatmaps(); }, [fetchHeatmaps]);
   useEffect(() => {
     if (tab === "feed") fetchTrends();
   }, [tab, fetchTrends]);
+
+  // Fetch global data on mount
+  useEffect(() => {
+    fetchCameras();
+    fetchAircraft();
+    fetchSatellites();
+  }, [fetchCameras, fetchAircraft, fetchSatellites]);
+
+  // Auto-refresh aircraft every 15s
+  useEffect(() => {
+    const id = setInterval(fetchAircraft, 15000);
+    return () => clearInterval(id);
+  }, [fetchAircraft]);
 
   // Handle GIBS layer selection
   useEffect(() => {
