@@ -90,6 +90,97 @@ TILE_SOURCES = {
         "name": "Terrain (Stamen)",
         "category": "base",
     },
+
+    # --- Global Expansion: NASA GIBS Layers ---
+    "NASA GIBS Terra True Color": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "MODIS_Terra_CorrectedReflectance_TrueColor/default/"
+            "{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg"
+        ),
+        "attr": "NASA EOSDIS GIBS",
+        "name": "NASA Terra True Color (Daily)",
+        "category": "satellite",
+        "temporal": True,
+    },
+    "NASA VIIRS Night Lights": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "VIIRS_SNPP_DayNightBand_At_Sensor_Radiance/default/"
+            "{time}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png"
+        ),
+        "attr": "NASA EOSDIS GIBS",
+        "name": "VIIRS Nighttime Lights",
+        "category": "nighttime",
+        "temporal": True,
+    },
+    "NASA Blue Marble": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "BlueMarble_NextGeneration/default/"
+            "GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg"
+        ),
+        "attr": "NASA Blue Marble",
+        "name": "Blue Marble (NASA)",
+        "category": "satellite",
+    },
+    "NASA Black Marble": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "VIIRS_Black_Marble/default/"
+            "GoogleMapsCompatible_Level8/{z}/{y}/{x}.png"
+        ),
+        "attr": "NASA Black Marble / VIIRS",
+        "name": "Earth at Night (Black Marble)",
+        "category": "nighttime",
+    },
+    "NASA Active Fires": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "MODIS_Terra_Thermal_Anomalies_Day/default/"
+            "{time}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png"
+        ),
+        "attr": "NASA EOSDIS GIBS - MODIS Fire",
+        "name": "Active Fires (MODIS)",
+        "category": "overlay",
+        "overlay": True,
+        "temporal": True,
+    },
+    "NASA NDVI": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "MODIS_Terra_NDVI_8Day/default/"
+            "{time}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png"
+        ),
+        "attr": "NASA EOSDIS GIBS - MODIS NDVI",
+        "name": "Vegetation Index (NDVI)",
+        "category": "overlay",
+        "overlay": True,
+        "temporal": True,
+    },
+    "NASA Aerosol": {
+        "url": (
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+            "MODIS_Terra_Aerosol_Optical_Depth/default/"
+            "{time}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png"
+        ),
+        "attr": "NASA EOSDIS GIBS - MODIS AOD",
+        "name": "Aerosol Optical Depth",
+        "category": "overlay",
+        "overlay": True,
+        "temporal": True,
+    },
+
+    # --- Sentinel Hub (free limited access) ---
+    "Sentinel-2 True Color": {
+        "url": (
+            "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/"
+            "GoogleMapsCompatible/{z}/{y}/{x}.jpg"
+        ),
+        "attr": "&copy; Sentinel-2 cloudless - EOX &amp; EU/ESA/Copernicus",
+        "name": "Sentinel-2 Cloudless (2021)",
+        "category": "satellite",
+    },
 }
 
 

@@ -19,9 +19,14 @@ export default function TopBar() {
         <span className="text-[10px] md:text-xs font-mono tracking-[0.15em] md:tracking-[0.2em] text-[#00d4aa] uppercase">
           Franklin St Data
         </span>
+        <span className="hidden md:inline text-[8px] font-mono text-[#454a58] border border-[#1e2028] rounded px-1.5 py-0.5 uppercase">
+          Global
+        </span>
       </div>
 
-      <div className="flex items-center gap-2 md:gap-6 text-[9px] md:text-xs text-[#6b7080] font-mono">
+      <div className="flex items-center gap-2 md:gap-4 text-[9px] md:text-xs text-[#6b7080] font-mono">
+        <span className="hidden lg:inline text-[#454a58]">CesiumJS</span>
+        <span className="hidden lg:inline text-[#454a58]">·</span>
         <span className="hidden md:inline">35.9132&deg;N 79.0555&deg;W</span>
         <span className="hidden md:inline text-[#454a58]">|</span>
         <span className="hidden sm:inline">Chapel Hill, NC</span>

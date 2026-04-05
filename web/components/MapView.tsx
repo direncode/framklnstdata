@@ -20,10 +20,38 @@ interface Venue {
   signals?: Record<string, string>;
 }
 
+import type { DisplayMode } from "./DisplayModes";
+import { getDisplayModeFilter } from "./DisplayModes";
+
 interface HeatmapPoint {
   lat: number;
   lon: number;
   weight: number;
+}
+
+interface CameraPoint {
+  id: string | number;
+  lat: number;
+  lon: number;
+  type: string;
+  operator: string;
+}
+
+interface AircraftPoint {
+  icao24: string;
+  callsign: string;
+  lat: number;
+  lon: number;
+  altitude_m: number;
+  heading: number;
+}
+
+interface SatellitePoint {
+  name: string;
+  norad_id: number;
+  lat: number;
+  lon: number;
+  alt_km: number;
 }
 
 function busynessColor(b: number | null): string {
@@ -54,6 +82,15 @@ export default function MapView({
   searchHeatmap,
   showTraffic,
   showSearch,
+  cameras = [],
+  showCameras = false,
+  aircraft = [],
+  showAircraft = false,
+  satellites = [],
+  showSatellites = false,
+  displayMode = "normal",
+  gibsLayerUrl,
+  showGIBS = false,
 }: {
   venues: Venue[];
   hour: number;
@@ -62,10 +99,22 @@ export default function MapView({
   searchHeatmap?: HeatmapPoint[];
   showTraffic: boolean;
   showSearch: boolean;
+  cameras?: CameraPoint[];
+  showCameras?: boolean;
+  aircraft?: AircraftPoint[];
+  showAircraft?: boolean;
+  satellites?: SatellitePoint[];
+  showSatellites?: boolean;
+  displayMode?: DisplayMode;
+  gibsLayerUrl?: string | null;
+  showGIBS?: boolean;
 }) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const cameraMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const aircraftMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const satelliteMarkersRef = useRef<maplibregl.Marker[]>([]);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
@@ -315,15 +364,156 @@ export default function MapView({
     });
   }, [venues, hour, onVenueClick]);
 
+  // Camera markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    cameraMarkersRef.current.forEach((m) => m.remove());
+    cameraMarkersRef.current = [];
+    if (!showCameras) return;
+
+    cameras.forEach((cam) => {
+      if (!cam.lat || !cam.lon) return;
+      const color = cam.type === "ALPR" ? "#ff4d6a" : cam.type === "traffic" ? "#ffaa00" : "#00d4aa";
+      const el = document.createElement("div");
+      el.style.width = "8px";
+      el.style.height = "8px";
+      el.style.borderRadius = "2px";
+      el.style.border = `1.5px solid ${color}`;
+      el.style.backgroundColor = `${color}66`;
+      el.style.boxShadow = `0 0 4px ${color}44`;
+      el.title = `${cam.type} — ${cam.operator}`;
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat([cam.lon, cam.lat])
+        .addTo(map);
+      cameraMarkersRef.current.push(marker);
+    });
+  }, [cameras, showCameras]);
+
+  // Aircraft markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    aircraftMarkersRef.current.forEach((m) => m.remove());
+    aircraftMarkersRef.current = [];
+    if (!showAircraft) return;
+
+    aircraft.forEach((ac) => {
+      if (!ac.lat || !ac.lon) return;
+      const el = document.createElement("div");
+      el.style.width = "0";
+      el.style.height = "0";
+      el.style.borderLeft = "5px solid transparent";
+      el.style.borderRight = "5px solid transparent";
+      el.style.borderBottom = "12px solid #4a9eff";
+      el.style.transform = `rotate(${ac.heading || 0}deg)`;
+      el.style.filter = "drop-shadow(0 0 3px #4a9eff88)";
+      el.title = `${ac.callsign || ac.icao24} — ${ac.altitude_m ? Math.round(ac.altitude_m * 3.28084).toLocaleString() + "ft" : ""}`;
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat([ac.lon, ac.lat])
+        .addTo(map);
+      aircraftMarkersRef.current.push(marker);
+    });
+  }, [aircraft, showAircraft]);
+
+  // Satellite markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    satelliteMarkersRef.current.forEach((m) => m.remove());
+    satelliteMarkersRef.current = [];
+    if (!showSatellites) return;
+
+    satellites.forEach((sat) => {
+      if (!sat.lat || !sat.lon) return;
+      const el = document.createElement("div");
+      el.style.width = "6px";
+      el.style.height = "6px";
+      el.style.borderRadius = "50%";
+      el.style.backgroundColor = "#ff6600";
+      el.style.border = "1px solid #ff660088";
+      el.style.boxShadow = "0 0 6px #ff660066";
+      el.title = `${sat.name} — ${sat.alt_km?.toFixed(0)}km`;
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat([sat.lon, sat.lat])
+        .addTo(map);
+      satelliteMarkersRef.current.push(marker);
+    });
+  }, [satellites, showSatellites]);
+
+  // GIBS overlay layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    // Remove previous GIBS layer
+    if (map.getLayer("gibs-overlay")) map.removeLayer("gibs-overlay");
+    if (map.getSource("gibs-source")) map.removeSource("gibs-source");
+
+    if (showGIBS && gibsLayerUrl) {
+      map.addSource("gibs-source", {
+        type: "raster",
+        tiles: [gibsLayerUrl],
+        tileSize: 256,
+      });
+      map.addLayer({
+        id: "gibs-overlay",
+        type: "raster",
+        source: "gibs-source",
+        paint: { "raster-opacity": 0.7 },
+      });
+    }
+  }, [gibsLayerUrl, showGIBS, mapReady]);
+
+  // Display mode filter
+  const filterStyle = getDisplayModeFilter(displayMode);
+
   return (
     <div className="relative w-full h-full">
-      <div ref={mapContainer} className="w-full h-full" />
+      <div ref={mapContainer} className="w-full h-full" style={{ filter: filterStyle }} />
+
+      {/* CRT scanline overlay */}
+      {displayMode === "crt" && (
+        <div
+          className="absolute inset-0 pointer-events-none z-20"
+          style={{
+            background: "repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px)",
+            mixBlendMode: "multiply",
+          }}
+        />
+      )}
+
+      {/* Night vision vignette */}
+      {displayMode === "night_vision" && (
+        <div
+          className="absolute inset-0 pointer-events-none z-20"
+          style={{
+            background: "radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.6) 100%)",
+          }}
+        />
+      )}
+
+      {/* Display mode indicator */}
+      {displayMode !== "normal" && (
+        <div className="absolute top-3 right-14 bg-[#0a0b0fcc] px-3 py-1.5 rounded text-[10px] font-mono tracking-wider uppercase pointer-events-none z-30"
+          style={{
+            color: displayMode === "night_vision" ? "#00ff41" : displayMode === "flir" ? "#ff6600" : "#00d4aa",
+            textShadow: displayMode !== "crt" ? `0 0 6px currentColor` : "none",
+          }}
+        >
+          {displayMode.replace("_", " ")}
+        </div>
+      )}
 
       {/* Overlay label */}
-      <div className="absolute top-3 left-3 bg-[#0a0b0fcc] px-3 py-1.5 rounded text-[10px] font-mono text-[#00d4aa] tracking-wider uppercase pointer-events-none">
+      <div className="absolute top-3 left-3 bg-[#0a0b0fcc] px-3 py-1.5 rounded text-[10px] font-mono text-[#00d4aa] tracking-wider uppercase pointer-events-none z-30">
         Live Foot Traffic — {hour}:00
         {showTraffic && <span className="ml-2 text-[#ff6600]">HEAT</span>}
         {showSearch && <span className="ml-2 text-[#a050ff]">SEARCH</span>}
+        {showCameras && <span className="ml-2 text-[#ff4d6a]">CAM</span>}
+        {showAircraft && <span className="ml-2 text-[#4a9eff]">ADS-B</span>}
+        {showSatellites && <span className="ml-2 text-[#ff6600]">SAT</span>}
+        {showGIBS && <span className="ml-2 text-[#00d4aa]">GIBS</span>}
       </div>
 
       {/* Legend */}

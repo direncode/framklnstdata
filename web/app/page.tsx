@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import TopBar from "@/components/TopBar";
 import Sidebar from "@/components/Sidebar";
 import MapView from "@/components/MapView";
@@ -9,8 +9,18 @@ import FeedView from "@/components/FeedView";
 import HourSlider from "@/components/HourSlider";
 import StatusBar from "@/components/StatusBar";
 import CommandPanel from "@/components/CommandPanel";
+import CameraLayer from "@/components/CameraLayer";
+import AircraftTracker from "@/components/AircraftTracker";
+import SatelliteTracker from "@/components/SatelliteTracker";
+import StreetView from "@/components/StreetView";
+import GlobalPanel from "@/components/GlobalPanel";
+import DisplayModes from "@/components/DisplayModes";
+import type { DisplayMode } from "@/components/DisplayModes";
 
-type Tab = "map" | "feed" | "intel" | "command";
+// Lazy-load CesiumJS globe (heavy dependency)
+const GlobeView = lazy(() => import("@/components/GlobeView"));
+
+type Tab = "map" | "globe" | "cameras" | "aircraft" | "satellites" | "street" | "feed" | "intel" | "command" | "global";
 
 interface Venue {
   name: string;
@@ -57,7 +67,34 @@ interface HeatmapPoint {
   weight: number;
 }
 
+interface CameraPoint {
+  id: string | number;
+  lat: number;
+  lon: number;
+  type: string;
+  operator: string;
+}
+
+interface AircraftPoint {
+  icao24: string;
+  callsign: string;
+  lat: number;
+  lon: number;
+  altitude_m: number;
+  heading: number;
+  origin_country: string;
+}
+
+interface SatellitePoint {
+  name: string;
+  norad_id: number;
+  lat: number;
+  lon: number;
+  alt_km: number;
+}
+
 export default function Home() {
+  // Original state
   const [tab, setTab] = useState<Tab>("map");
   const [hour, setHour] = useState(new Date().getHours());
   const [venues, setVenues] = useState<Venue[]>([]);
@@ -66,10 +103,25 @@ export default function Home() {
   const [apiConnected, setApiConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
-  const [showTraffic, setShowTraffic] = useState(true);  // Default ON
+  const [showTraffic, setShowTraffic] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
   const [trafficHeatmap, setTrafficHeatmap] = useState<HeatmapPoint[]>([]);
   const [searchHeatmap, setSearchHeatmap] = useState<HeatmapPoint[]>([]);
+
+  // Global expansion state
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("normal");
+  const [cameras, setCameras] = useState<CameraPoint[]>([]);
+  const [showCameras, setShowCameras] = useState(false);
+  const [aircraft, setAircraft] = useState<AircraftPoint[]>([]);
+  const [showAircraft, setShowAircraft] = useState(false);
+  const [satellites, setSatellites] = useState<SatellitePoint[]>([]);
+  const [showSatellites, setShowSatellites] = useState(false);
+  const [satelliteTracks, setSatelliteTracks] = useState<any[]>([]);
+  const [selectedGIBSLayer, setSelectedGIBSLayer] = useState<string | null>(null);
+  const [showGIBS, setShowGIBS] = useState(false);
+  const [gibsLayerUrl, setGibsLayerUrl] = useState<string | null>(null);
+
+  // --- Data Fetching ---
 
   const fetchVenues = useCallback(async () => {
     setLoading(true);
@@ -86,7 +138,6 @@ export default function Home() {
         }
       }
     } catch { /* empty */ }
-    // Try /venues as fallback
     try {
       const res = await fetch(`${API_BASE}/venues`);
       if (res.ok) {
@@ -116,14 +167,12 @@ export default function Home() {
   }, []);
 
   const fetchHeatmaps = useCallback(async () => {
-    // Traffic heatmap from BTUT density field
     if (showTraffic) {
       try {
         const res = await fetch(`${API_BASE}/heatmap?hour=${hour}`);
         if (res.ok) {
           const data = await res.json();
           const points = data?.heatmap || (Array.isArray(data) ? data : []);
-          // Backend returns [[lat, lon, weight], ...] or {heatmap: [...]}
           const mapped = points.map((p: number[] | HeatmapPoint) =>
             Array.isArray(p) ? { lat: p[0], lon: p[1], weight: p[2] } : p
           );
@@ -131,7 +180,6 @@ export default function Home() {
         }
       } catch { /* empty */ }
     }
-    // Search convergence heatmap
     if (showSearch) {
       try {
         const res = await fetch(`${API_BASE}/convergence?hour=${hour}`);
@@ -147,19 +195,39 @@ export default function Home() {
     }
   }, [hour, showTraffic, showSearch]);
 
-  useEffect(() => {
-    fetchVenues();
-  }, [fetchVenues]);
+  // GIBS layer URL resolution
+  const fetchGIBSLayer = useCallback(async (layerKey: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/gibs?layer=${layerKey}`);
+      if (res.ok) {
+        const data = await res.json();
+        setGibsLayerUrl(data.tile_url || null);
+        setShowGIBS(true);
+      }
+    } catch { /* empty */ }
+  }, []);
 
-  useEffect(() => {
-    fetchHeatmaps();
-  }, [fetchHeatmaps]);
-
+  // Effects
+  useEffect(() => { fetchVenues(); }, [fetchVenues]);
+  useEffect(() => { fetchHeatmaps(); }, [fetchHeatmaps]);
   useEffect(() => {
     if (tab === "feed") fetchTrends();
   }, [tab, fetchTrends]);
 
+  // Handle GIBS layer selection
+  useEffect(() => {
+    if (selectedGIBSLayer) {
+      fetchGIBSLayer(selectedGIBSLayer);
+    } else {
+      setGibsLayerUrl(null);
+      setShowGIBS(false);
+    }
+  }, [selectedGIBSLayer, fetchGIBSLayer]);
+
   const liveCount = venues.filter((v) => v.busyness != null && v.busyness > 0).length;
+
+  // Determine if we need the globe view loaded
+  const needsGlobe = tab === "globe";
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -173,6 +241,9 @@ export default function Home() {
             <div className="text-sm font-mono text-[#454a58]">
               Connecting to BTUT Mean-Field Game Engine...
             </div>
+            <div className="text-xs font-mono text-[#454a58] mt-1">
+              Initializing global surveillance stack
+            </div>
             <div className="mt-4 w-48 h-0.5 bg-[#1e2028] rounded-full overflow-hidden mx-auto">
               <div className="h-full bg-[#00d4aa] rounded-full animate-[loading_2s_ease-in-out_infinite]" style={{width: "60%"}} />
             </div>
@@ -184,11 +255,11 @@ export default function Home() {
       <div className="flex-1 flex overflow-hidden pb-14 md:pb-0">
         <Sidebar active={tab} onTabChange={setTab} />
 
-        {/* Main content area */}
+        {/* ====== MAP TAB (Original + Global Layers) ====== */}
         {tab === "map" && (
           <>
-            {/* Left control strip — hidden on mobile */}
-            <div className="hidden md:flex w-52 bg-[#0d0e13] border-r border-[#1e2028] flex-col shrink-0">
+            {/* Left control strip */}
+            <div className="hidden md:flex w-52 bg-[#0d0e13] border-r border-[#1e2028] flex-col shrink-0 overflow-y-auto">
               <HourSlider value={hour} onChange={setHour} />
 
               {/* Quick stats */}
@@ -216,12 +287,12 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Heatmap Layers */}
+              {/* Map Layers */}
               <div className="px-4 py-3 border-b border-[#1e2028]">
                 <div className="text-[10px] font-mono tracking-[0.15em] text-[#454a58] uppercase mb-2">
                   Map Layers
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <button
                     onClick={() => setShowTraffic(!showTraffic)}
                     className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
@@ -244,7 +315,63 @@ export default function Home() {
                     <span className={`w-2 h-2 rounded-full ${showSearch ? "bg-[#a050ff]" : "bg-[#1e2028]"}`} />
                     Search Convergence
                   </button>
+                  <button
+                    onClick={() => setShowCameras(!showCameras)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showCameras
+                        ? "bg-[#ff4d6a20] text-[#ff4d6a] border border-[#ff4d6a44]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showCameras ? "bg-[#ff4d6a]" : "bg-[#1e2028]"}`} />
+                    Cameras
+                  </button>
+                  <button
+                    onClick={() => setShowAircraft(!showAircraft)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showAircraft
+                        ? "bg-[#4a9eff20] text-[#4a9eff] border border-[#4a9eff44]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showAircraft ? "bg-[#4a9eff]" : "bg-[#1e2028]"}`} />
+                    Aircraft (ADS-B)
+                  </button>
+                  <button
+                    onClick={() => setShowSatellites(!showSatellites)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showSatellites
+                        ? "bg-[#ff660020] text-[#ff6600] border border-[#ff660044]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showSatellites ? "bg-[#ff6600]" : "bg-[#1e2028]"}`} />
+                    Satellites
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (showGIBS) {
+                        setShowGIBS(false);
+                        setSelectedGIBSLayer(null);
+                      } else {
+                        setSelectedGIBSLayer("modis_terra_truecolor");
+                      }
+                    }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                      showGIBS
+                        ? "bg-[#00d4aa20] text-[#00d4aa] border border-[#00d4aa44]"
+                        : "text-[#454a58] hover:text-[#6b7080] hover:bg-[#111318]"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${showGIBS ? "bg-[#00d4aa]" : "bg-[#1e2028]"}`} />
+                    NASA GIBS
+                  </button>
                 </div>
+              </div>
+
+              {/* Display Modes */}
+              <div className="px-4 py-3 border-b border-[#1e2028]">
+                <DisplayModes active={displayMode} onChange={setDisplayMode} />
               </div>
 
               {/* Data sources */}
@@ -257,6 +384,10 @@ export default function Home() {
                     { name: "BTUT Engine", status: liveCount > 0 },
                     { name: "OpenStreetMap", status: apiConnected },
                     { name: "Google Trends", status: apiConnected },
+                    { name: "OpenSky ADS-B", status: aircraft.length > 0 },
+                    { name: "CelesTrak TLE", status: satellites.length > 0 },
+                    { name: "NASA GIBS", status: showGIBS },
+                    { name: "Camera Intel", status: cameras.length > 0 },
                   ].map((s) => (
                     <div key={s.name} className="flex items-center gap-2">
                       <span
@@ -304,10 +435,19 @@ export default function Home() {
                 searchHeatmap={searchHeatmap}
                 showTraffic={showTraffic}
                 showSearch={showSearch}
+                cameras={cameras}
+                showCameras={showCameras}
+                aircraft={aircraft}
+                showAircraft={showAircraft}
+                satellites={satellites}
+                showSatellites={showSatellites}
+                displayMode={displayMode}
+                gibsLayerUrl={gibsLayerUrl}
+                showGIBS={showGIBS}
               />
             </div>
 
-            {/* Right panel - venue list — hidden on mobile */}
+            {/* Right panel - venue list */}
             <div className="hidden lg:block">
               <VenuePanel
                 venues={venues}
@@ -318,6 +458,61 @@ export default function Home() {
           </>
         )}
 
+        {/* ====== 3D GLOBE TAB ====== */}
+        {tab === "globe" && (
+          <div className="flex-1 relative">
+            <Suspense fallback={
+              <div className="w-full h-full bg-[#0a0b0f] flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-lg font-mono text-[#00d4aa] animate-pulse mb-2">
+                    LOADING 3D GLOBE
+                  </div>
+                  <div className="text-xs font-mono text-[#454a58]">
+                    Initializing CesiumJS...
+                  </div>
+                </div>
+              </div>
+            }>
+              <GlobeView
+                cameras={cameras}
+                aircraft={aircraft}
+                satellites={satellites}
+                satelliteTracks={satelliteTracks}
+                displayMode={displayMode}
+                gibsLayer={selectedGIBSLayer ? gibsLayerUrl?.split("/").slice(-4, -3)[0] : null}
+              />
+            </Suspense>
+          </div>
+        )}
+
+        {/* ====== CAMERAS TAB ====== */}
+        {tab === "cameras" && (
+          <CameraLayer
+            onCamerasLoaded={(cams) => setCameras(cams)}
+          />
+        )}
+
+        {/* ====== AIRCRAFT TAB ====== */}
+        {tab === "aircraft" && (
+          <AircraftTracker
+            onAircraftLoaded={(acs) => setAircraft(acs)}
+          />
+        )}
+
+        {/* ====== SATELLITES TAB ====== */}
+        {tab === "satellites" && (
+          <SatelliteTracker
+            onSatellitesLoaded={(sats) => setSatellites(sats)}
+            onTrackLoaded={(track) => setSatelliteTracks(track)}
+          />
+        )}
+
+        {/* ====== STREET VIEW TAB ====== */}
+        {tab === "street" && (
+          <StreetView />
+        )}
+
+        {/* ====== FEED TAB ====== */}
         {tab === "feed" && (
           <FeedView
             suggestions={trends?.suggestions || []}
@@ -328,10 +523,12 @@ export default function Home() {
           />
         )}
 
+        {/* ====== COMMAND TAB ====== */}
         {tab === "command" && (
           <CommandPanel hour={hour} />
         )}
 
+        {/* ====== INTEL TAB ====== */}
         {tab === "intel" && (
           <div className="flex-1 p-4 md:p-8 overflow-y-auto grid-overlay pb-16 md:pb-8">
             <h2 className="text-[10px] font-mono tracking-[0.2em] text-[#00d4aa] uppercase mb-4 md:mb-6">
@@ -360,6 +557,26 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Global expansion stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div className="metric-card">
+                <div className="text-[9px] text-[#454a58] uppercase">Cameras</div>
+                <div className="text-xl font-mono text-[#ff4d6a] mt-1">{cameras.length}</div>
+              </div>
+              <div className="metric-card">
+                <div className="text-[9px] text-[#454a58] uppercase">Aircraft</div>
+                <div className="text-xl font-mono text-[#4a9eff] mt-1">{aircraft.length}</div>
+              </div>
+              <div className="metric-card">
+                <div className="text-[9px] text-[#454a58] uppercase">Satellites</div>
+                <div className="text-xl font-mono text-[#ff6600] mt-1">{satellites.length}</div>
+              </div>
+              <div className="metric-card">
+                <div className="text-[9px] text-[#454a58] uppercase">Display</div>
+                <div className="text-xl font-mono text-[#a050ff] mt-1 uppercase">{displayMode.replace("_", " ")}</div>
+              </div>
+            </div>
+
             {/* How it works */}
             <div className="border border-[#1e2028] rounded-lg p-6 bg-[#111318]">
               <h3 className="text-xs font-mono text-[#6b7080] uppercase tracking-wider mb-4">
@@ -376,15 +593,19 @@ export default function Home() {
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">03</span>
-                  <span>The BTUT engine fuses all signals into a drift velocity field v[&rho;], then solves the Fokker-Planck PDE: &part;&rho;/&part;t = -&nabla;&middot;(v[&rho;]&rho;) + &sigma;&sup2;/2 &Delta;&rho; to convergence.</span>
+                  <span>The BTUT engine fuses all signals into a drift velocity field v[&rho;], then solves the Fokker-Planck PDE to convergence.</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">04</span>
-                  <span>The density field &rho;(x,t) is sampled at each venue position to produce busyness scores (0-100%), and along the corridor spine for the continuous heat map.</span>
+                  <span>CesiumJS renders a 3D globe with satellite orbits (CelesTrak TLE), live aircraft (OpenSky ADS-B), and surveillance cameras (OSM + DOT feeds).</span>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-[#00d4aa] font-mono shrink-0">05</span>
-                  <span>Move the hour slider. Watch the density field shift as venue type profiles change — cafes peak at morning, bars at night. The mean-field finds approximate Nash equilibrium.</span>
+                  <span>NASA GIBS provides global satellite imagery: MODIS true color, VIIRS nighttime lights, thermal anomalies, vegetation indices, and more.</span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-[#00d4aa] font-mono shrink-0">06</span>
+                  <span>Display modes simulate military optics: Gen III night vision phosphor green, FLIR thermal infrared, and CRT retro monitor aesthetics.</span>
                 </div>
               </div>
             </div>
@@ -438,12 +659,26 @@ export default function Home() {
             )}
           </div>
         )}
+
+        {/* ====== GLOBAL PANEL TAB ====== */}
+        {tab === "global" && (
+          <GlobalPanel
+            onGIBSLayerSelect={setSelectedGIBSLayer}
+            selectedGIBSLayer={selectedGIBSLayer}
+            cameraCount={cameras.length}
+            aircraftCount={aircraft.length}
+            satelliteCount={satellites.length}
+          />
+        )}
       </div>
 
       <StatusBar
         venueCount={venues.length}
         liveCount={liveCount}
         apiConnected={apiConnected}
+        cameraCount={cameras.length}
+        aircraftCount={aircraft.length}
+        satelliteCount={satellites.length}
       />
     </div>
   );

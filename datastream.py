@@ -77,6 +77,37 @@ from network import (
     compute_walk_scores,
     get_network_lines,
 )
+from global_cameras import (
+    get_all_cameras,
+    get_global_camera_stats,
+    fetch_cameras_osm,
+    compute_coverage_area,
+)
+from aircraft_tracking import (
+    fetch_aircraft,
+    fetch_regional_aircraft,
+    get_aircraft_stats,
+    get_aircraft_geojson,
+    REGION_BOXES,
+)
+from satellite_orbits import (
+    fetch_tle_data,
+    get_overhead_satellites,
+    get_constellation_stats,
+    get_satellite_geojson,
+    compute_ground_track,
+    TLE_CATEGORIES,
+)
+from gibs_layers import (
+    get_gibs_layer_config,
+    get_gibs_catalog,
+    get_available_dates,
+)
+from street_imagery import (
+    get_street_imagery_coverage,
+    fetch_mapillary_images,
+    get_panorama_url,
+)
 from main import generate_report
 
 # Version
@@ -573,6 +604,147 @@ def handle_convergence(params):
         return {"error": f"Search convergence error: {str(e)}"}
 
 
+def handle_cameras(params):
+    """Surveillance camera intelligence for an area."""
+    lat = float(params.get("lat", [str(FRANKLIN_STREET_CENTER[0])])[0])
+    lon = float(params.get("lon", [str(FRANKLIN_STREET_CENTER[1])])[0])
+    radius = float(params.get("radius", ["0.02"])[0])
+    bbox = (lat - radius, lon - radius, lat + radius, lon + radius)
+    return get_all_cameras(bbox=bbox)
+
+
+def handle_cameras_global():
+    """Global surveillance camera statistics and hotspots."""
+    return get_global_camera_stats()
+
+
+def handle_aircraft(params):
+    """Live aircraft tracking from OpenSky Network ADS-B."""
+    region = params.get("region", ["chapel_hill"])[0]
+    if region in REGION_BOXES:
+        aircraft = fetch_regional_aircraft(region)
+    else:
+        # Custom bbox
+        try:
+            south = float(params.get("south", ["34.5"])[0])
+            west = float(params.get("west", ["-80.5"])[0])
+            north = float(params.get("north", ["37.0"])[0])
+            east = float(params.get("east", ["-77.5"])[0])
+            aircraft = fetch_aircraft(bbox=(south, west, north, east))
+        except (ValueError, IndexError):
+            aircraft = fetch_regional_aircraft("chapel_hill")
+
+    stats = get_aircraft_stats(aircraft)
+    geojson = get_aircraft_geojson(aircraft)
+
+    return {
+        "aircraft": aircraft,
+        "stats": stats,
+        "geojson": geojson,
+        "regions": list(REGION_BOXES.keys()),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_satellites(params):
+    """Satellite orbit tracking from CelesTrak TLE data."""
+    category = params.get("category", ["stations"])[0]
+    categories = [c.strip() for c in category.split(",")]
+
+    all_sats = []
+    for cat in categories:
+        if cat in TLE_CATEGORIES:
+            sats = fetch_tle_data(cat)
+            all_sats.extend(sats)
+
+    geojson = get_satellite_geojson(all_sats)
+    overhead = get_overhead_satellites(
+        observer_lat=float(params.get("lat", [str(FRANKLIN_STREET_CENTER[0])])[0]),
+        observer_lon=float(params.get("lon", [str(FRANKLIN_STREET_CENTER[1])])[0]),
+    )
+    constellations = get_constellation_stats()
+
+    return {
+        "satellites": all_sats[:200],  # Limit response size
+        "satellite_count": len(all_sats),
+        "geojson": geojson,
+        "overhead": overhead[:20],
+        "constellations": constellations,
+        "available_categories": list(TLE_CATEGORIES.keys()),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_satellite_track(params):
+    """Compute ground track for a specific satellite."""
+    category = params.get("category", ["stations"])[0]
+    name = params.get("name", ["ISS"])[0].upper()
+    duration = int(params.get("duration", ["90"])[0])
+
+    sats = fetch_tle_data(category)
+    sat = next((s for s in sats if name in s.get("name", "").upper()), None)
+
+    if not sat:
+        return {"error": f"Satellite '{name}' not found in category '{category}'"}
+
+    track = compute_ground_track(sat, duration_min=duration)
+    return {
+        "satellite": sat["name"],
+        "norad_id": sat.get("norad_id"),
+        "track": track,
+        "duration_min": duration,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_gibs(params):
+    """NASA GIBS satellite imagery layer configuration."""
+    layer = params.get("layer", [None])[0]
+    date = params.get("date", [None])[0]
+
+    if layer:
+        config = get_gibs_layer_config(layer, date=date)
+        if config:
+            return config
+        return {"error": f"Unknown GIBS layer: {layer}"}
+
+    # Return full catalog
+    catalog = get_gibs_catalog()
+    return {
+        "catalog": catalog,
+        "layer_count": len(catalog),
+        "categories": list(set(v["category"] for v in catalog.values())),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def handle_gibs_dates(params):
+    """Available dates for a temporal GIBS layer."""
+    layer = params.get("layer", ["modis_terra_truecolor"])[0]
+    count = int(params.get("count", ["30"])[0])
+    dates = get_available_dates(layer, count=count)
+    return {"layer": layer, "dates": dates}
+
+
+def handle_street_imagery(params):
+    """Street-level imagery coverage and links."""
+    lat = float(params.get("lat", [str(FRANKLIN_STREET_CENTER[0])])[0])
+    lon = float(params.get("lon", [str(FRANKLIN_STREET_CENTER[1])])[0])
+    radius = float(params.get("radius", ["0.01"])[0])
+
+    bbox = (lon - radius, lat - radius, lon + radius, lat + radius)
+    coverage = get_street_imagery_coverage(bbox=bbox)
+
+    # Add panorama viewer URLs
+    coverage["panorama_urls"] = {
+        "mapillary": get_panorama_url(lat, lon, "mapillary"),
+        "kartaview": get_panorama_url(lat, lon, "kartaview"),
+        "google": get_panorama_url(lat, lon, "google"),
+    }
+
+    return coverage
+
+
 def handle_export(params):
     """Complete data export — all feeds combined."""
     hour = _parse_hour(params.get("hour", [None])[0])
@@ -635,6 +807,14 @@ class DataHandler(BaseHTTPRequestHandler):
             "/forecast": lambda: handle_forecast(params),
             "/density": lambda: handle_density(params),
             "/convergence": lambda: handle_convergence(params),
+            "/cameras": lambda: handle_cameras(params),
+            "/cameras/global": handle_cameras_global,
+            "/aircraft": lambda: handle_aircraft(params),
+            "/satellites": lambda: handle_satellites(params),
+            "/satellites/track": lambda: handle_satellite_track(params),
+            "/gibs": lambda: handle_gibs(params),
+            "/gibs/dates": lambda: handle_gibs_dates(params),
+            "/street-imagery": lambda: handle_street_imagery(params),
             "/report": lambda: handle_report(params),
             "/export": lambda: handle_export(params),
         }
