@@ -161,12 +161,16 @@ export default function MapView({
           },
         ],
       },
-      center: [-79.055, 35.92],
-      zoom: 14.5,
+      center: [-79.055, 35.913],
+      zoom: 15.5,
       pitch: 0,
       bearing: 0,
       maxZoom: 19,
-      minZoom: 12,
+      minZoom: 14,
+      maxBounds: [
+        [-79.08, 35.895], // SW corner
+        [-79.03, 35.935], // NE corner
+      ],
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
